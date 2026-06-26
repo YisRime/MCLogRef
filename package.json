@@ -12,6 +12,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@lancedb/lancedb": "^0.30.0",
     "@nuxt/eslint": "1.16.0",
     "@nuxt/ui": "4.9.0",
     "@tiptap/core": "^3.27.1",
@@ -31,7 +33,10 @@
     "@tiptap/starter-kit": "^3.27.1",
     "@tiptap/suggestion": "^3.27.1",
     "@tiptap/vue-3": "^3.27.1",
+    "better-sqlite3": "^12.11.1",
     "eslint": "^10.5.0",
+    "jszip": "^3.10.1",
+    "llamaindex": "^0.12.1",
     "nuxt": "^4.4.8",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
