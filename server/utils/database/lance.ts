@@ -9,6 +9,7 @@ export interface VectorRecord {
   meta: Record<string, string>
   text: string
   vector: number[]
+  _distance?: number
 }
 
 let connection: Connection | null = null

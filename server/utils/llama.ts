@@ -61,15 +61,26 @@ export interface SearchResult {
   rid: number
 }
 
+function rerank(results: VectorRecord[], queryTags: Record<string, string>): SearchResult[] {
+  return results.map(r => {
+    const semanticScore = 1 - (r._distance ?? 0)
+    let metaScore = 0
+    if (queryTags.error && r.meta.error === queryTags.error) metaScore += 0.5
+    if (queryTags.loader && r.meta.loader === queryTags.loader) metaScore += 0.3
+    if (queryTags.version && r.meta.version === queryTags.version) metaScore += 0.2
+    const finalScore = (semanticScore * 0.4) + (metaScore * 0.6)
+    return { text: r.text, meta: r.meta, score: finalScore, rid: r.rid }
+  }).sort((a, b) => b.score - a.score)
+}
+
 export async function searchSimilar(query: string, limit: number = 5, filter?: Record<string, string>): Promise<SearchResult[]> {
   const queryVector = await embedText(query)
+  const candidateLimit = Math.max(limit * 3, 20)
   let filterStr: string | undefined
-  if (filter) {
-    const conditions = Object.entries(filter).map(([key, value]) => { return `meta.${key} = '${value}'` })
-    filterStr = conditions.join(' AND ')
-  }
-  const results = await searchVectors(queryVector, limit, filterStr)
-  return results.map(r => ({ text: r.text, meta: r.meta, score: 0, rid: r.rid }))
+  if (filter && filter.loader) filterStr = `meta.loader = '${filter.loader}'`
+  const candidates = await searchVectors(queryVector, candidateLimit, filterStr)
+  const reranked = rerank(candidates, filter || {})
+  return reranked.slice(0, limit)
 }
 
 export async function closeEmbeddingModel(): Promise<void> {

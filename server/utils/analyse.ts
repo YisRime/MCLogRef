@@ -87,7 +87,11 @@ export async function buildContext(rid: number): Promise<AnalysisContext> {
   const filter: Record<string, string> = {}
   const loaderTag = tags.find(t => t.type === 'loader')
   if (loaderTag) filter.loader = loaderTag.value
-  const searchResults = await searchSimilar(mainContent, 3, Object.keys(filter).length > 0 ? filter : undefined)
+  const versionTag = tags.find(t => t.type === 'version')
+  if (versionTag) filter.version = versionTag.value
+  const errorTag = tags.find(t => t.type === 'error')
+  if (errorTag) filter.error = errorTag.value
+  const searchResults = await searchSimilar(mainContent, 3, filter)
   const similarCases: SimilarCase[] = []
   for (const r of searchResults) {
     const historyReport = getReport(r.rid)
