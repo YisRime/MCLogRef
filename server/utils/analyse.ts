@@ -1,11 +1,13 @@
 import { searchSimilar } from './llama'
 import { getReport, getTagsByReport, getFilesByReport, type Report, type Tag, type File } from './database/sqlite'
 import { getConfig } from './config'
+import { chunkText } from './extract'
 
 export interface AnalysisContext {
   report: Report
   files: File[]
   tags: Tag[]
+  mainContent: string
   similarCases: SimilarCase[]
 }
 
@@ -16,58 +18,96 @@ export interface SimilarCase {
   solution: string
 }
 
+const SYSTEM_PROMPT = `你是专业的 Minecraft 模组崩溃分析专家。
+你精通 Java 异常堆栈分析，了解游戏机制，擅长解决各种 Mod 之间的冲突。
+你需要根据用户提供的相关信息及核心日志，结合相似案例，给出解决方案。
+若信息不足以准确确定原因，请加以说明，并给出可能性最高的几个排查方向。
+
+你需要严格遵守以下输出规范，且根据指定的诊断逻辑进行诊断，然后回复：
+
+# 输出规范：回复必须包含且仅包含以下内容：
+  ## 诊断结果
+   - **核心问题**: 根据解决方案，用一句话概括问题的原因。
+   - **错误特征**: 提取关键异常，以及涉及的 Mod ID 或类名。
+  ## 解决方案
+   - **核心方案**: 若参考了，请给出最贴切的修复建议。
+   - **详细步骤**: 分条列出操作步骤。涉及文件操作必须指明路径。
+  ## 补充建议 (可选)
+   - 针对内存分配、显卡驱动、Java 环境或其它风险的相关提醒。
+
+# 诊断逻辑
+
+1. **Java 环境与版本匹配**
+   - **特征识别**: 识别 "Unsupported class file major version" 或 "ClassMetadataNotFoundException" 等。
+   - **类版本映射**: 主版本号：65 -> Java 21, 61 -> Java 17, 60 -> Java 16, 55 -> Java 11, 52 -> Java 8。
+2. **依赖关系与版本不匹配**
+   - **特征识别**: 搜索 "Missing or unsupported mandatory dependencies"、"requires... which is missing!"。
+   - **环境错位**: 若 SERVER 环境出现 "Attempted to load class net/minecraft/client"，则误装了仅客户端的模组。
+3. **模组冲突与 Mixin 注入**
+   - **特征识别**: 搜索 "MixinTransformerError" 或 "InjectionError"。
+   - **逻辑**: 若日志中出现 "handler$xxx$method" 模式，定位注入失败的类。
+   - **硬冲突**: 若识别到 Overwrite/Redirect 导致的冲突，建议用户二选一。
+   - **地物循环**: 若 "Feature order cycle"，建议安装 Cyanide 模组再分析。
+4. **实体与模型崩溃**
+   - **特征识别**: 搜索 "Ticking Entity"、"Rendering Block Entity" 或 "Tesselating block model"。
+   - **定位**: 寻找坐标（Location）和区块信息（Region: r.x.z.mca）。
+   - **方案**: 建议使用 Neruina 自动处理或 NBTExplorer/Amulet 手动删除。
+5. **JVM 错误与驱动**
+   - **特征识别**: 识别 "EXCEPTION_ACCESS_VIOLATION" 及生成的 hs_err_pid.log。
+   - **显卡关联**: nvoglv64.dll -> NVIDIA（更新驱动），atio6axx.dll -> AMD（更新/降级驱动，关闭 XMP），ig*.dll -> Intel（关闭 VBOs 或更换 Java 8u51）。
+   - **编译器错误**: 若出现 "C2 CompilerThread"，添加参数 -XX:TieredStopAtLevel=3。`
+
+function generateUserPrompt(tagSummary: string, mainContent: string, similarSection: string): string {
+  return `# 相关信息
+${tagSummary}
+# 核心日志
+\`\`\`text\n${mainContent}\n\`\`\`
+# 相似案例
+${similarSection}`
+}
+
+function extractSignature(content: string): string {
+  const chunks = chunkText(content)
+  const criticalChunks = chunks.filter(c => {
+    const section = c.meta.section
+    return section ? ['crash_header', 'head', 'mod_error', 'entity_ticked', 'block_entity_ticked'].includes(section) : false
+  })
+  if (criticalChunks.length > 0) return criticalChunks.map(c => c.text).join('\n').slice(0, 1536)
+  if (content.length > 2048) return content.slice(0, 1024) + '\n...\n' + content.slice(-512)
+  return content
+}
+
 export async function buildContext(rid: number): Promise<AnalysisContext> {
   const report = getReport(rid)
   if (!report) throw new Error(`Report ${rid} Not Found`)
   const files = getFilesByReport(rid)
   const tags = getTagsByReport(rid)
-  const crashFile = files.find(f => f.type === 'crash') ?? files[0]
-  const queryText = crashFile?.content.slice(0, 500) ?? report.name
+  const crashFile = files.find(f => f.type === 'crash' || f.type === 'gamelog') ?? files[0]
+  const mainContent = crashFile ? extractSignature(crashFile.content) : report.name
   const filter: Record<string, string> = {}
-  const versionTag = tags.find(t => t.type === 'version')
   const loaderTag = tags.find(t => t.type === 'loader')
-  if (versionTag) filter.version = versionTag.value
   if (loaderTag) filter.loader = loaderTag.value
-  const searchResults = await searchSimilar(queryText, 5, Object.keys(filter).length > 0 ? filter : undefined)
-  const similarCases: SimilarCase[] = searchResults.map(r => ({ rid: r.rid, text: r.text, meta: r.meta, solution: '' }))
-  return { report, files, tags, similarCases }
+  const searchResults = await searchSimilar(mainContent, 3, Object.keys(filter).length > 0 ? filter : undefined)
+  const similarCases: SimilarCase[] = []
+  for (const r of searchResults) {
+    const historyReport = getReport(r.rid)
+    if (historyReport && historyReport.solution) similarCases.push({ rid: r.rid, text: r.text, meta: r.meta, solution: historyReport.solution })
+  }
+  return { report, files, tags, similarCases, mainContent }
 }
 
 export function buildPrompt(context: AnalysisContext): string {
-  const { report, files, tags, similarCases } = context
-  const systemInfo = files.find(f => f.type === 'crash')?.content ?? files[0]?.content ?? ''
-  const tagSummary = tags.map(t => `${t.type}: ${t.value}`).join('\n')
+  const { tags, similarCases, mainContent } = context
+  const tagSummary = tags.map(t => `- ${t.type}: ${t.value}`).join('\n')
   let similarSection = ''
   if (similarCases.length > 0) {
     similarSection = `
-## 历史相似案例
-以下是与当前问题相似的历史案例及其解决方案：
-${similarCases.map((c, i) => `### 案例 ${i + 1}
-**元数据**: ${Object.entries(c.meta).map(([k, v]) => `${k}=${v}`).join(', ')}
-**内容片段**:
-\`\`\`
-${c.text.slice(0, 500)}
-\`\`\`
-**解决方案**: ${c.solution || '暂无'}`).join('\n\n')}
+${similarCases.map((c, i) => `## 案例 ${i + 1}
+- 报错特征: ${c.text.slice(0, 1024).replace(/\n/g, ' ')}...
+- 解决方案: ${c.solution}`).join('\n\n')}
 `
   }
-
-  return `你是一个专业的 Minecraft 模组崩溃分析专家。请根据以下信息分析当前崩溃问题，并给出详细的诊断和操作建议。
-## 当前问题
-**报告名称**: ${report.name}
-**标签信息**:
-${tagSummary || '无'}
-**崩溃日志/游戏日志**:
-\`\`\`
-${systemInfo.slice(0, 3000)}
-\`\`\`
-${similarSection}
-## 分析要求
-1. **问题定位**: 识别崩溃的根本原因，包括具体的模组、代码位置或配置问题
-2. **原因分析**: 解释为什么会出现这个问题
-3. **解决方案**: 提供具体的操作步骤来解决问题
-4. **预防建议**: 如何避免类似问题再次发生
-请用中文回答，格式清晰，步骤具体。`
+  return generateUserPrompt(tagSummary, mainContent, similarSection)
 }
 
 export interface AnalysisResult {
@@ -80,53 +120,52 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
   const prompt = buildPrompt(context)
   const { apiUrl, apiKey, apiModel } = getConfig()
   if (!apiUrl || !apiKey || !apiModel) {
-    yield { content: '错误：未配置 LLM API。请在设置中配置 API_URL、API_KEY 和 API_MODEL。', done: true }
+    yield { content: 'Error: LLM API Not Configured', done: true }
     return
   }
-  const response = await fetch(`${apiUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: apiModel,
-      messages: [
-        { role: 'system', content: '你是一个专业的 Minecraft 模组崩溃分析专家。' },
-        { role: 'user', content: prompt },
-      ],
-      stream: true,
-    }),
-  })
-  if (!response.ok) {
-    yield { content: `错误：LLM API 请求失败 (${response.status})`, done: true }
-    return
-  }
-  const reader = response.body?.getReader()
-  if (!reader) {
-    yield { content: '错误：无法读取响应流', done: true }
-    return
-  }
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || !trimmed.startsWith('data: ')) continue
-      const data = trimmed.slice(6)
-      if (data === '[DONE]') {
-        yield { content: '', done: true }
-        return
-      }
-      const parsed = JSON.parse(data)
-      const content = parsed.choices?.[0]?.delta?.content
-      if (content) yield { content, done: false }
+  try {
+    const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: apiModel, stream: true, temperature: 0.2,
+        messages: [ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: prompt }],
+      }),
+    })
+    if (!response.ok) {
+      yield { content: `Error: LLM API Request Failed with ${response.status}`, done: true }
+      return
     }
+    const reader = response.body?.getReader()
+    if (!reader) {
+      yield { content: 'Error: Unable to Read Response Stream', done: true }
+      return
+    }
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        const data = trimmed.slice(6)
+        if (data === '[DONE]') {
+          yield { content: '', done: true }
+          return
+        }
+        try {
+          const parsed = JSON.parse(data)
+          const content = parsed.choices?.[0]?.delta?.content
+          if (content) yield { content, done: false }
+        } catch { /* Ignore */ }
+      }
+    }
+  } catch (error) {
+    yield { content: `\nError: Response Stream Terminated with ${error instanceof Error ? error.message : String(error)}`, done: true }
   }
   yield { content: '', done: true }
 }
