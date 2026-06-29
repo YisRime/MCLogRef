@@ -67,14 +67,14 @@ ${similarSection}`
 }
 
 function extractSignature(content: string): string {
-  const chunks = chunkText(content)
-  const criticalChunks = chunks.filter(c => {
-    const section = c.meta.section
-    return section ? ['crash_header', 'head', 'mod_error', 'entity_ticked', 'block_entity_ticked'].includes(section) : false
-  })
-  if (criticalChunks.length > 0) return criticalChunks.map(c => c.text).join('\n').slice(0, 1536)
-  if (content.length > 2048) return content.slice(0, 1024) + '\n...\n' + content.slice(-512)
-  return content
+  const chunks = chunkText(content).sort((a, b) => a.priority - b.priority)
+  let result = ''
+  for (const chunk of chunks) {
+    if (result.length + chunk.text.length > 5120 && result.length >= 3072) break
+    result += (result ? '\n\n' : '') + chunk.text
+    if (result.length >= 5120) break
+  }
+  return result || content.slice(0, 4096)
 }
 
 export async function buildContext(rid: number): Promise<AnalysisContext> {

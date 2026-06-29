@@ -37,6 +37,7 @@ export interface ExtractedTags {
 export interface TextChunk {
   text: string
   meta: Record<string, string>
+  priority: number // 1: 核心, 2: 重要, 3: 普通
 }
 
 function extractGroupKey(filepath: string): string {
@@ -284,19 +285,16 @@ export function extractTags(group: FileGroup): ExtractedTags {
   return tags
 }
 
+const ERROR_KEYWORDS = /Exception|Error|WARN|FATAL|Crash|Ticking|Render/i
+const TIME_PATTERN = /^\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]|^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?\]/
+const P1_SECTIONS = ['crash_header', 'head', 'mod_error', 'entity_ticked', 'block_entity_ticked', 'walkthrough']
+const P2_SECTIONS = ['system_details', 'mixins', 'shader', 'mod_list', 'mod_table']
+
 function findSectionBoundaries(lines: string[]): Array<{ start: number; end: number; name: string }> {
   const sections: Array<{ start: number; end: number; name: string }> = []
-  const markers: Array<{ pattern: RegExp; name: string }> = [
-    { pattern: /^---- Minecraft Crash Report ----/i, name: 'crash_header' },
-    { pattern: /^-- System Details --/i, name: 'system_details' },
-    { pattern: /^-- Head --/i, name: 'head' },
-    { pattern: /^-- Affected screen --/i, name: 'affected_screen' },
-    { pattern: /^-- Affected level --/i, name: 'affected_level' },
-    { pattern: /^-- Entity being ticked --/i, name: 'entity_ticked' },
-    { pattern: /^-- Block entity being ticked --/i, name: 'block_entity_ticked' },
+  const sectionHeaderPattern = /^(?:----|--)\s*(.+?)\s*(?:----|--)\s*$/
+  const customMarkers = [
     { pattern: /^A detailed walkthrough/i, name: 'walkthrough' },
-    { pattern: /^-- MOD\s+/i, name: 'mod_error' },
-    { pattern: /^\s*Mod\s+File:/i, name: 'mod_error' },
     { pattern: /^FML:|^States:/i, name: 'mod_list' },
     { pattern: /^\| State \| ID/i, name: 'mod_table' },
     { pattern: /^Mod List:/i, name: 'mod_list' },
@@ -305,67 +303,92 @@ function findSectionBoundaries(lines: string[]): Array<{ start: number; end: num
     { pattern: /^Suspected Mods?:/i, name: 'system_details' },
     { pattern: /^Mixins in Stacktrace:/i, name: 'mixins' },
     { pattern: /^Loaded Shaderpack:/i, name: 'shader' },
+    { pattern: /^-- MOD\s+/i, name: 'mod_error' },
+    { pattern: /^\s*Mod\s+File:/i, name: 'mod_error' },
   ]
-  let currentSection: { start: number; name: string } | null = null
+  let current: { start: number; name: string } | null = null
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    for (const marker of markers) {
-      if (marker.pattern.test(line)) {
-        if (currentSection) sections.push({ start: currentSection.start, end: i - 1, name: currentSection.name })
-        currentSection = { start: i, name: marker.name }
-        break
+    const line = lines[i] || ''
+    let foundName = ''
+    const match = line.match(sectionHeaderPattern)
+    if (match?.[1] && match[1].length > 2) {
+      foundName = match[1].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '')
+    } else {
+      for (const m of customMarkers) if (m.pattern.test(line)) { foundName = m.name; break }
+    }
+    if (foundName) {
+      if (current) {
+        let end = i - 1
+        while (end > current.start && !(lines[end] || '').trim()) end--
+        sections.push({ ...current, end })
       }
+      current = { start: i, name: foundName }
     }
   }
-  if (currentSection) sections.push({ start: currentSection.start, end: lines.length - 1, name: currentSection.name })
+  if (current) sections.push({ ...current, end: lines.length - 1 })
   return sections
+}
+
+function getPriority(name: string | undefined, errorCount: number, lines: number): number {
+  if (name && P1_SECTIONS.includes(name)) return 1
+  if (errorCount > lines * 0.1 || errorCount > 5) return 1
+  if (name && P2_SECTIONS.includes(name)) return 2
+  if (errorCount > 0) return 2
+  return 3
+}
+
+function chunkLogText(lines: string[], meta: Record<string, string>): TextChunk[] {
+  const chunks: TextChunk[] = []
+  let buf: string[] = [], len = 0, errs = 0
+  for (const line of lines) {
+    const isNew = TIME_PATTERN.test(line)
+    if ((len >= 3584 && isNew) || len >= 4608) {
+      chunks.push({ text: buf.join('\n'), priority: getPriority(meta.section, errs, buf.length), meta: { ...meta, has_errors: errs > 0 ? 'true' : 'false' } })
+      buf = []; len = 0; errs = 0
+    }
+    buf.push(line); len += line.length + 1
+    if (ERROR_KEYWORDS.test(line)) errs++
+  }
+  if (buf.length) chunks.push({ text: buf.join('\n'), priority: getPriority(meta.section, errs, buf.length), meta: { ...meta, has_errors: errs > 0 ? 'true' : 'false' } })
+  return chunks
+}
+
+function optimizeChunks(chunks: TextChunk[]): TextChunk[] {
+  const result: TextChunk[] = []
+  let curr: TextChunk | null = null
+  for (const chunk of chunks) {
+    if (!chunk.text.trim()) continue
+    if (curr && curr.meta.section === chunk.meta.section && curr.priority === chunk.priority && curr.text.length + chunk.text.length < 4608) {
+      curr.text += '\n' + chunk.text
+    } else {
+      if (curr) result.push(curr)
+      curr = { ...chunk }
+    }
+  }
+  if (curr) result.push(curr)
+  return result.flatMap(c => {
+    if (c.text.length <= 5120) return [c]
+    const parts: TextChunk[] = []
+    let text = c.text
+    while (text.length > 0) {
+      parts.push({ text: text.slice(0, 4096), priority: c.priority, meta: c.meta })
+      text = text.slice(4096)
+    }
+    return parts
+  })
 }
 
 export function chunkText(content: string, meta: Record<string, string> = {}): TextChunk[] {
   const lines = content.split('\n')
-  const chunks: TextChunk[] = []
   const sections = findSectionBoundaries(lines)
-  if (sections.length > 0) {
-    for (const section of sections) {
-      const sectionLines = lines.slice(section.start, section.end + 1)
-      const sectionText = sectionLines.join('\n')
-      if (sectionText.length > 4096) {
-        for (const sub of splitBySize(sectionText, 4096)) chunks.push({ text: sub, meta: { ...meta, section: section.name } })
-      } else if (sectionLines.length > 128) {
-        for (const sub of splitByLines(sectionLines, 128)) chunks.push({ text: sub.join('\n'), meta: { ...meta, section: section.name } })
-      } else {
-        chunks.push({ text: sectionText, meta: { ...meta, section: section.name } })
-      }
-    }
-  } else {
-    if (lines.length <= 128) {
-      chunks.push({ text: content, meta })
-    } else if (content.length <= 4096) {
-      for (const sub of splitByLines(lines, 128)) chunks.push({ text: sub.join('\n'), meta })
-    } else {
-      for (const sub of splitBySize(content, 4096)) chunks.push({ text: sub, meta })
-    }
+  const chunks: TextChunk[] = []
+  if (sections.length === 0) return optimizeChunks(chunkLogText(lines, meta))
+  if (sections[0]!.start > 0) chunks.push(...chunkLogText(lines.slice(0, sections[0]!.start), meta))
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i]!
+    chunks.push(...chunkLogText(lines.slice(s.start, s.end + 1), { ...meta, section: s.name }))
+    const nextStart = sections[i + 1]?.start ?? lines.length
+    if (s.end + 1 < nextStart) chunks.push(...chunkLogText(lines.slice(s.end + 1, nextStart), meta))
   }
-  return chunks
-}
-
-function splitByLines(lines: string[], chunkSize: number): string[][] {
-  const chunks: string[][] = []
-  for (let i = 0; i < lines.length; i += chunkSize) chunks.push(lines.slice(i, i + chunkSize))
-  return chunks
-}
-
-function splitBySize(text: string, maxSize: number): string[] {
-  const chunks: string[] = []
-  let current = ''
-  const lines = text.split('\n')
-  for (const line of lines) {
-    if (current.length + line.length + 1 > maxSize && current.length > 0) {
-      chunks.push(current)
-      current = ''
-    }
-    current += (current ? '\n' : '') + line
-  }
-  if (current) chunks.push(current)
-  return chunks
+  return optimizeChunks(chunks)
 }
