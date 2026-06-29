@@ -1,4 +1,5 @@
 import { join } from 'path'
+import { existsSync, mkdirSync, writeFileSync, renameSync } from 'fs'
 import { getConfig } from '../utils/config'
 import { createReport, createFile, createTag, updateReport } from '../utils/database/sqlite'
 import { extractTags, readFileGroup } from '../utils/extract'
@@ -11,12 +12,13 @@ export default defineEventHandler(async (event) => {
   if (!file?.filename) return { status: 400, data: { message: 'No Filename' } }
   try {
     const dataDir = getConfig('dataDir')
-    const uploadDir = join(dataDir, 'uploads')
-    const { mkdirSync, writeFileSync, existsSync } = await import('fs')
-    if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true })
-    const filePath = join(uploadDir, file.filename)
-    writeFileSync(filePath, file.data)
-    const group = await readFileGroup([file.filename], uploadDir)
+    const tempDir = join(dataDir, 'temp')
+    const userDir = join(dataDir, 'files', 'user')
+    if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+    if (!existsSync(userDir)) mkdirSync(userDir, { recursive: true })
+    const tempPath = join(tempDir, file.filename)
+    writeFileSync(tempPath, file.data)
+    const group = await readFileGroup([file.filename], tempDir)
     const rid = createReport(group.name)
     const tags = extractTags(group)
     for (const tag of tags.version) createTag(rid, 'version', tag)
@@ -31,6 +33,11 @@ export default defineEventHandler(async (event) => {
       updateReport(rid, { solution: group.solution.solution, status: 1 })
     } else {
       updateReport(rid, { status: 2 })
+    }
+    for (const root of group.filePath) {
+      const src = join(tempDir, root)
+      const dest = join(userDir, root)
+      if (existsSync(src)) renameSync(src, dest)
     }
     return { status: 200, data: { id: rid, name: group.name } }
   } catch (err) {

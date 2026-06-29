@@ -7,6 +7,7 @@ export interface FileGroup {
   files: GroupFile[]
   chat?: ChatRecord
   solution?: SolutionRecord
+  filePath: string[]
 }
 
 export interface GroupFile {
@@ -140,7 +141,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
       contentFiles.push({ name: base, type: fileType, content })
     } catch { /* Ignore */ }
   }
-  return { name: groupBaseName, files: contentFiles, chat, solution }
+  return { name: groupBaseName, files: contentFiles, chat, solution, filePath: filePaths }
 }
 
 async function readZipFile(zipPath: string): Promise<GroupFile[]> {
@@ -185,8 +186,9 @@ export async function readDirectory(dirPath: string): Promise<FileGroup[]> {
     const fileGroup = await readFileGroup(group, dirPath)
     groups.push(fileGroup)
   }
-  for (const files of subDirs.values()) {
+  for (const [dirName, files] of subDirs.entries()) {
     const fileGroup = await readFileGroup(files, dirPath)
+    fileGroup.filePath = [dirName]
     groups.push(fileGroup)
   }
   return groups

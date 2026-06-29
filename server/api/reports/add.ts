@@ -1,4 +1,5 @@
 import { join } from 'path'
+import { existsSync, mkdirSync, renameSync } from 'fs'
 import { readDirectory, extractTags } from '../../utils/extract'
 import { createReport, createFile, createTag, updateReport } from '../../utils/database/sqlite'
 import { vectorizeAndStore } from '../../utils/llama'
@@ -6,8 +7,11 @@ import { getConfig } from '../../utils/config'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ dir?: string }>(event)
-  const dir = body?.dir ?? join(getConfig('dataDir'), 'imports')
+  const dataDir = getConfig('dataDir')
+  const dir = body?.dir ?? join(dataDir, 'temp')
+  const adminDir = join(dataDir, 'files', 'admin')
   try {
+    if (!existsSync(adminDir)) mkdirSync(adminDir, { recursive: true })
     const groups = await readDirectory(dir)
     const results: Array<{ id: number; name: string }> = []
     for (const group of groups) {
@@ -25,6 +29,13 @@ export default defineEventHandler(async (event) => {
         updateReport(rid, { solution: group.solution.solution, status: 1 })
       } else {
         updateReport(rid, { status: 2 })
+      }
+      for (const root of group.filePath) {
+        const src = join(dir, root)
+        const dest = join(adminDir, root)
+        try {
+          if (existsSync(src)) renameSync(src, dest)
+        } catch { /* Ignore */ }
       }
       results.push({ id: rid, name: group.name })
     }
