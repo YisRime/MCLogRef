@@ -92,6 +92,11 @@ export function getReport(id: number): Report | undefined {
   return db.prepare('SELECT * FROM reports WHERE id = ?').get(id) as Report | undefined
 }
 
+export function getReportByName(name: string): Report | undefined {
+  const db = getDatabase()
+  return db.prepare('SELECT * FROM reports WHERE name = ?').get(name) as Report | undefined
+}
+
 export function getReports(): Report[] {
   const db = getDatabase()
   return db.prepare('SELECT * FROM reports ORDER BY timestamp DESC').all() as Report[]

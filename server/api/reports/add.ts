@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, renameSync } from 'fs'
 import { readDirectory, extractTags } from '../../utils/extract'
-import { createReport, createFile, createTag, updateReport } from '../../utils/database/sqlite'
+import { createReport, createFile, createTag, updateReport, getReportByName } from '../../utils/database/sqlite'
 import { vectorizeAndStore } from '../../utils/llama'
 import { getConfig } from '../../utils/config'
 
@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
     const groups = await readDirectory(dir)
     const results: Array<{ id: number; name: string }> = []
     for (const group of groups) {
+      if (getReportByName(group.name)) continue
       const rid = createReport(group.name)
       const tags = extractTags(group)
       for (const tag of tags.version) createTag(rid, 'version', tag)

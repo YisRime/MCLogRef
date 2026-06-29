@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, renameSync } from 'fs'
 import { getConfig } from '../utils/config'
-import { createReport, createFile, createTag, updateReport } from '../utils/database/sqlite'
+import { createReport, createFile, createTag, updateReport, getReportByName } from '../utils/database/sqlite'
 import { extractTags, readFileGroup } from '../utils/extract'
 import { vectorizeAndStore } from '../utils/llama'
 
@@ -19,6 +19,8 @@ export default defineEventHandler(async (event) => {
     const tempPath = join(tempDir, file.filename)
     writeFileSync(tempPath, file.data)
     const group = await readFileGroup([file.filename], tempDir)
+    const existing = getReportByName(group.name)
+    if (existing) return { status: 200, data: { id: existing.id, name: existing.name, message: 'Report Already Exists' } }
     const rid = createReport(group.name)
     const tags = extractTags(group)
     for (const tag of tags.version) createTag(rid, 'version', tag)

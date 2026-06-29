@@ -1,8 +1,10 @@
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers'
 import { insertVectors, searchVectors, type VectorRecord } from './database/lance'
 import { chunkText, type ExtractedTags } from './extract'
+import { join } from 'path'
+import { getConfig } from './config'
 
-env.cacheDir = './models'
+env.cacheDir = join(getConfig('dataDir'), 'models')
 let embeddingModel: FeatureExtractionPipeline | null = null
 const MODEL_NAME = 'Xenova/bge-small-en-v1.5'
 
