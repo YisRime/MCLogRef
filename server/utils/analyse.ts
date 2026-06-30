@@ -67,17 +67,21 @@ ${similarSection}`
 }
 
 function extractSignature(content: string): string {
+  const { textChunk, chunkOffset } = getConfig()
+  const lowerLimit = textChunk - chunkOffset
+  const upperLimit = textChunk + chunkOffset
   const chunks = chunkText(content).sort((a, b) => a.priority - b.priority)
   let result = ''
   for (const chunk of chunks) {
-    if (result.length + chunk.text.length > 5120 && result.length >= 3072) break
+    if (result.length + chunk.text.length > upperLimit && result.length >= lowerLimit) break
     result += (result ? '\n\n' : '') + chunk.text
-    if (result.length >= 5120) break
+    if (result.length >= upperLimit) break
   }
-  return result || content.slice(0, 4096)
+  return result || content.slice(0, textChunk)
 }
 
 export async function buildContext(rid: number): Promise<AnalysisContext> {
+  const { searchLimit } = getConfig()
   const report = getReport(rid)
   if (!report) throw new Error(`Report ${rid} Not Found`)
   const files = getFilesByReport(rid)
@@ -91,7 +95,7 @@ export async function buildContext(rid: number): Promise<AnalysisContext> {
   if (versionTag) filter.version = versionTag.value
   const errorTag = tags.find(t => t.type === 'error')
   if (errorTag) filter.error = errorTag.value
-  const searchResults = await searchSimilar(mainContent, 3, filter)
+  const searchResults = await searchSimilar(mainContent, searchLimit, filter)
   const similarCases: SimilarCase[] = []
   for (const r of searchResults) {
     const historyReport = getReport(r.rid)
@@ -107,7 +111,7 @@ export function buildPrompt(context: AnalysisContext): string {
   if (similarCases.length > 0) {
     similarSection = `
 ${similarCases.map((c, i) => `## 案例 ${i + 1}
-- 报错特征: ${c.text.slice(0, 1024).replace(/\n/g, ' ')}...
+- 报错特征: \n\`\`\`text\n${c.text}\n\`\`\`
 - 解决方案: ${c.solution}`).join('\n\n')}
 `
   }
@@ -122,7 +126,7 @@ export interface AnalysisResult {
 export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult> {
   const context = await buildContext(rid)
   const prompt = buildPrompt(context)
-  const { apiUrl, apiKey, apiModel } = getConfig()
+  const { apiUrl, apiKey, apiModel, temperature } = getConfig()
   if (!apiUrl || !apiKey || !apiModel) {
     yield { content: 'Error: LLM API Not Configured', done: true }
     return
@@ -132,7 +136,7 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: apiModel, stream: true, temperature: 0.2,
+        model: apiModel, stream: true, temperature: temperature,
         messages: [ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: prompt }],
       }),
     })

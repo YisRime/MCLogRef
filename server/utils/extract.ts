@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from 'fs/promises'
 import { join, extname, basename } from 'path'
 import JSZip from 'jszip'
+import { getConfig } from './config'
 
 export interface FileGroup {
   name: string
@@ -337,11 +338,14 @@ function getPriority(basePriority: number | undefined, errorCount: number, lines
 }
 
 function chunkLogText(lines: string[], meta: Record<string, string>, basePriority?: number): TextChunk[] {
+  const { textChunk, chunkOffset } = getConfig()
+  const lowerBound = textChunk - chunkOffset
+  const upperBound = textChunk + chunkOffset
   const chunks: TextChunk[] = []
   let buf: string[] = [], len = 0, errs = 0
   for (const line of lines) {
     const isNew = TIME_PATTERN.test(line)
-    if ((len >= 3584 && isNew) || len >= 4608) {
+    if ((len >= lowerBound && isNew) || len >= upperBound) {
       chunks.push({ text: buf.join('\n'), priority: getPriority(basePriority, errs, buf.length), meta: { ...meta, has_errors: errs > 0 ? 'true' : 'false' } })
       buf = []; len = 0; errs = 0
     }
@@ -353,11 +357,13 @@ function chunkLogText(lines: string[], meta: Record<string, string>, basePriorit
 }
 
 function optimizeChunks(chunks: TextChunk[]): TextChunk[] {
+  const { textChunk, chunkOffset } = getConfig()
+  const maxSafeLen = textChunk + chunkOffset
   const result: TextChunk[] = []
   let curr: TextChunk | null = null
   for (const chunk of chunks) {
     if (!chunk.text.trim()) continue
-    if (curr && curr.priority === chunk.priority && curr.text.length + chunk.text.length < 4608) {
+    if (curr && curr.priority === chunk.priority && curr.text.length + chunk.text.length < maxSafeLen) {
       curr.text += '\n' + chunk.text
     } else {
       if (curr) result.push(curr)
@@ -366,12 +372,12 @@ function optimizeChunks(chunks: TextChunk[]): TextChunk[] {
   }
   if (curr) result.push(curr)
   return result.flatMap(c => {
-    if (c.text.length <= 5120) return [c]
+    if (c.text.length <= textChunk + chunkOffset * 2) return [c]
     const parts: TextChunk[] = []
     let text = c.text
     while (text.length > 0) {
-      parts.push({ text: text.slice(0, 4096), priority: c.priority, meta: c.meta })
-      text = text.slice(4096)
+      parts.push({ text: text.slice(0, textChunk), priority: c.priority, meta: c.meta })
+      text = text.slice(textChunk)
     }
     return parts
   })

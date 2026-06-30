@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
         } catch { /* Ignore */ }
       }
       sendStatus()
-      const interval = setInterval(sendStatus, 5000)
+      const interval = setInterval(sendStatus, 10000)
       event.node.req.on('close', () => {
         clearInterval(interval)
         clients.delete(send)

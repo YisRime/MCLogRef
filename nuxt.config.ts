@@ -7,7 +7,13 @@ export default defineNuxtConfig({
     apiUrl: '',
     apiKey: '',
     apiModel: '',
+    temperature: 0.2,
     adminSecret: '',
     dataDir: './data',
+    textChunk: 16384,
+    chunkOffset: 4096,
+    searchLimit: 5,
+    searchCandidate: 50,
+    semanticWeight: 0.7,
   },
 })
