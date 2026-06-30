@@ -6,7 +6,7 @@ import { getConfig } from './config'
 
 env.cacheDir = join(getConfig('dataDir'), 'models')
 let embeddingModel: FeatureExtractionPipeline | null = null
-const MODEL_NAME = 'Xenova/bge-small-en-v1.5'
+const MODEL_NAME = 'Xenova/gte-base-en-v1.5'
 
 export async function loadEmbeddingModel(): Promise<FeatureExtractionPipeline> {
   if (embeddingModel) return embeddingModel

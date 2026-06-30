@@ -22,11 +22,11 @@ const defaultConfig: AppConfig = {
   temperature: 0.2,
   dataDir: './data',
   adminSecret: '',
-  textChunk: 16384,
-  chunkOffset: 4096,
+  textChunk: 6144,
+  chunkOffset: 2048,
   searchLimit: 5,
-  searchCandidate: 50,
-  semanticWeight: 0.7,
+  searchCandidate: 64,
+  semanticWeight: 0.6,
 }
 
 function getDataDir(): string {

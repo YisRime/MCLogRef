@@ -39,7 +39,7 @@ export async function getTable(): Promise<Table> {
     table = await conn.createTable('vectors', [
       {
         id: 0, rid: 0, meta: {}, text: '',
-        vector: new Array(384).fill(0),
+        vector: new Array(768).fill(0),
       },
     ])
   }
