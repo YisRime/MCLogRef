@@ -21,6 +21,10 @@ export default defineEventHandler(async (event) => {
         send(`扫描完成，共计 ${groups.length} 项`)
         for (let i = 0; i < groups.length; i++) {
           const group = groups[i]!
+          if (!group.solution || group.solution.has_solution !== true) {
+            send(`[${i + 1}/${groups.length}]${group.name} 无方案`)
+            continue
+          }
           if (getReportByName(group.name)) {
             send(`[${i + 1}/${groups.length}]${group.name} 已存在`)
             continue
@@ -37,11 +41,7 @@ export default defineEventHandler(async (event) => {
             createFile(rid, f.name, f.type, f.content)
             await vectorizeAndStore(rid, f.content, tags, f.type)
           }
-          if (group.solution?.solution) {
-            updateReport(rid, { solution: group.solution.solution, status: 1 })
-          } else {
-            updateReport(rid, { status: 2 })
-          }
+          updateReport(rid, { solution: group.solution.solution, status: 1 })
           for (const root of group.filePath) {
             const src = join(scanDir, root)
             const dest = join(adminDir, root)
