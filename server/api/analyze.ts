@@ -1,4 +1,5 @@
 import { analyzeStream } from '../utils/analyse'
+import { incrementStat } from '../utils/database/sqlite'
 
 export default defineEventHandler(async (event) => {
   let rid = Number(getQuery(event).rid)
@@ -7,6 +8,7 @@ export default defineEventHandler(async (event) => {
     rid = Number(body?.rid)
   }
   if (isNaN(rid) || rid <= 0) return { status: 400, data: { message: 'Invalid Report Id' } }
+  incrementStat('analyses')
   setResponseHeaders(event, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' })
   const stream = new ReadableStream({
     async start(controller) {

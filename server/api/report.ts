@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, renameSync } from 'fs'
 import { getConfig } from '../utils/config'
-import { createReport, createFile, createTag, updateReport, getReportByName } from '../utils/database/sqlite'
+import { createReport, createFile, createTag, updateReport, getReportByName, incrementStat } from '../utils/database/sqlite'
 import { extractTags, readFileGroup } from '../utils/extract'
 import { vectorizeAndStore } from '../utils/llama'
 
@@ -55,6 +55,7 @@ export default defineEventHandler(async (event) => {
           const dest = join(userDir, root)
           if (existsSync(src)) renameSync(src, dest)
         }
+        incrementStat('user_uploads')
         send('预处理完成', true, { id: rid, name: group.name })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload Failed'

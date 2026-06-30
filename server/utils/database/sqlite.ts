@@ -52,6 +52,12 @@ function initTables(): void {
       FOREIGN KEY (rid) REFERENCES reports(id) ON DELETE CASCADE
     )
   `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stats (
+      key TEXT PRIMARY KEY,
+      value INTEGER DEFAULT 0
+    )
+  `)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_rid ON files(rid)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tags_rid ON tags(rid)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tags_type ON tags(type)')
@@ -97,9 +103,9 @@ export function getReportByName(name: string): Report | undefined {
   return db.prepare('SELECT * FROM reports WHERE name = ?').get(name) as Report | undefined
 }
 
-export function getReports(): Report[] {
+export function getReports(limit: number = 100, offset: number = 0): Report[] {
   const db = getDatabase()
-  return db.prepare('SELECT * FROM reports ORDER BY timestamp DESC').all() as Report[]
+  return db.prepare('SELECT * FROM reports ORDER BY timestamp DESC LIMIT ? OFFSET ?').all(limit, offset) as Report[]
 }
 
 export function updateReport(id: number, data: Partial<Pick<Report, 'name' | 'solution' | 'status'>>): void {
@@ -158,6 +164,26 @@ export function getTagsByReport(rid: number): Tag[] {
 export function getTagsByType(type: Tag['type']): Tag[] {
   const db = getDatabase()
   return db.prepare('SELECT * FROM tags WHERE type = ?').all(type) as Tag[]
+}
+
+export function getStat(key: string): number {
+  const db = getDatabase()
+  const row = db.prepare('SELECT value FROM stats WHERE key = ?').get(key) as { value: number } | undefined
+  return row?.value || 0
+}
+
+export function incrementStat(key: string): void {
+  const db = getDatabase()
+  db.prepare('INSERT INTO stats (key, value) VALUES (?, 1) ON CONFLICT(key) DO UPDATE SET value = value + 1').run(key)
+}
+
+export function getGlobalCounts() {
+  const db = getDatabase()
+  const reports = db.prepare('SELECT COUNT(*) as count FROM reports').get() as { count: number }
+  const files = db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number }
+  const userReports = db.prepare('SELECT COUNT(*) as count FROM reports WHERE status = 2').get() as { count: number }
+  const adminReports = db.prepare('SELECT COUNT(*) as count FROM reports WHERE status = 1').get() as { count: number }
+  return { reports: reports.count, files: files.count, userReports: userReports.count, adminReports: adminReports.count }
 }
 
 export function closeDatabase(): void {
