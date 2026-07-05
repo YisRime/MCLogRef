@@ -10,6 +10,7 @@ export default defineEventHandler(async (event) => {
   const dataDir = getConfig('dataDir')
   const scanDir = body?.dir ?? join(dataDir, 'temp')
   const adminDir = join(dataDir, 'files', 'admin')
+  console.log(`[API] 开始导入：${scanDir}`)
   setResponseHeaders(event, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' })
   const stream = new ReadableStream({
     async start(controller) {

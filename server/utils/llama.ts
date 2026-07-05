@@ -3,29 +3,31 @@ import { insertVectors, searchVectors, type VectorRecord } from './database/lanc
 import { chunkText, type ExtractedTags } from './extract'
 import { join } from 'path'
 import { getConfig } from './config'
+import { setGlobalDispatcher, ProxyAgent } from 'undici'
 
+const MODEL_NAME = 'Xenova/bge-base-en-v1.5'
 env.cacheDir = join(getConfig('dataDir'), 'models')
 let embeddingModel: FeatureExtractionPipeline | null = null
-const MODEL_NAME = 'Xenova/gte-base-en-v1.5'
+if (process.env.PROXY_URL) setGlobalDispatcher(new ProxyAgent(process.env.PROXY_URL))
 
 export async function loadEmbeddingModel(): Promise<FeatureExtractionPipeline> {
   if (embeddingModel) return embeddingModel
+  console.log(`[Llama] 加载嵌入模型: ${MODEL_NAME}`)
   embeddingModel = await pipeline('feature-extraction', MODEL_NAME, { dtype: 'fp32' })
   return embeddingModel
 }
 
 export async function embedText(text: string): Promise<number[]> {
-  const model = await loadEmbeddingModel()
-  const output = await model(text, { pooling: 'cls', normalize: true })
-  const vector = Array.from(output.data as Float32Array)
-  return vector
+  if (!embeddingModel) await loadEmbeddingModel()
+  const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
+  return Array.from(output.data as Float32Array)
 }
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
-  const model = await loadEmbeddingModel()
+  if (!embeddingModel) await loadEmbeddingModel()
   const vectors: number[][] = []
   for (const text of texts) {
-    const output = await model(text, { pooling: 'cls', normalize: true })
+    const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
     vectors.push(Array.from(output.data as Float32Array))
   }
   return vectors
@@ -42,6 +44,7 @@ export async function vectorizeAndStore(rid: number, content: string, tags: Extr
   if (tags.loader.length > 0 && tags.loader[0]) meta.loader = tags.loader[0]
   if (tags.error.length > 0 && tags.error[0]) meta.error = tags.error[0]
   const chunks = chunkText(content, meta)
+  console.log(`[Llama] 开始向量化 ${fileType} 文件：${rid}，包含 ${chunks.length} 个切片`)
   let insertedCount = 0
   for (let i = 0; i < chunks.length; i += 10) {
     const batch = chunks.slice(i, i + 10)
@@ -51,6 +54,7 @@ export async function vectorizeAndStore(rid: number, content: string, tags: Extr
     await insertVectors(records)
     insertedCount += records.length
   }
+  console.log(`[Llama] ${rid} 向量化完成, 插入 ${insertedCount} 条记录`)
   return insertedCount
 }
 
@@ -84,6 +88,7 @@ export async function searchSimilar(query: string, limit?: number, filter?: Reco
   if (filter && filter.loader) filterStr = `meta.loader = '${filter.loader}'`
   const candidates = await searchVectors(queryVector, candidateLimit, filterStr)
   const reranked = rerank(candidates, filter || {})
+  console.log(`[Llama] 搜索完成，返回 ${Math.min(searchLimit, reranked.length)} 条记录`)
   return reranked.slice(0, searchLimit)
 }
 

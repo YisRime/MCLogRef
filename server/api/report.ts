@@ -12,6 +12,7 @@ export default defineEventHandler(async (event) => {
   if (!file || !file.filename) return { status: 400, data: { message: 'No Filename' } }
   const filename = file.filename
   const fileData = file.data
+  console.log(`[API] 上传文件：${filename}`)
   setResponseHeaders(event, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' })
   const stream = new ReadableStream({
     async start(controller) {
@@ -30,7 +31,6 @@ export default defineEventHandler(async (event) => {
         const existing = getReportByName(group.name)
         if (existing) {
           send(`${group.name} 已存在`, true, { id: existing.id, name: existing.name })
-          controller.close()
           return
         }
         const rid = createReport(group.name)
@@ -56,6 +56,7 @@ export default defineEventHandler(async (event) => {
           if (existsSync(src)) renameSync(src, dest)
         }
         incrementStat('user_uploads')
+        console.log(`[API] ${group.name} 上传完成，ID 为 ${rid}`)
         send('预处理完成', true, { id: rid, name: group.name })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload Failed'

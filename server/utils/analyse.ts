@@ -101,6 +101,7 @@ export async function buildContext(rid: number): Promise<AnalysisContext> {
     const historyReport = getReport(r.rid)
     if (historyReport && historyReport.solution) similarCases.push({ rid: r.rid, text: r.text, meta: r.meta, solution: historyReport.solution })
   }
+  console.log(`[Analyse] ${rid} 相似案例数: ${similarCases.length}`)
   return { report, files, tags, similarCases, mainContent }
 }
 
@@ -124,6 +125,7 @@ export interface AnalysisResult {
 }
 
 export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult> {
+  console.log(`[Analyse] 开始分析报告: ${rid}`)
   const context = await buildContext(rid)
   const prompt = buildPrompt(context)
   const { apiUrl, apiKey, apiModel, temperature } = getConfig()
@@ -132,7 +134,7 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
     return
   }
   try {
-    const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+    const response = await fetch(`${apiUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -162,6 +164,7 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
         if (!trimmed || !trimmed.startsWith('data: ')) continue
         const data = trimmed.slice(6)
         if (data === '[DONE]') {
+          console.log(`[Analyse] 报告 ${rid} 分析完成`)
           yield { content: '', done: true }
           return
         }

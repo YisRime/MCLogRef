@@ -8,6 +8,7 @@ export default defineEventHandler(async (event) => {
     rid = Number(body?.rid)
   }
   if (isNaN(rid) || rid <= 0) return { status: 400, data: { message: 'Invalid Report Id' } }
+  console.log(`[API] 开始分析：${rid}`)
   incrementStat('analyses')
   setResponseHeaders(event, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' })
   const stream = new ReadableStream({

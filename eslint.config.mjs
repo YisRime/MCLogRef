@@ -11,8 +11,6 @@ export default withNuxt(
       'semi': ['warn', 'never'],
       'quotes': ['warn', 'single'],
       'comma-dangle': ['warn', 'always-multiline'],
-      'no-console': 'warn',
-      'no-debugger': 'error',
       'no-duplicate-imports': 'error',
     },
   },

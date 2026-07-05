@@ -15,6 +15,7 @@ export function getDatabase(): Database.Database {
   const path = getDbPath()
   const dir = getConfig('dataDir')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  console.log(`[SQLite] 初始化数据库: ${path}`)
   db = new Database(path)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')

@@ -38,7 +38,7 @@ export interface ExtractedTags {
 export interface TextChunk {
   text: string
   meta: Record<string, string>
-  priority: number // 1: 核心, 2: 重要, 3: 普通
+  priority: number
 }
 
 function extractGroupKey(filepath: string): string {
@@ -143,6 +143,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
       contentFiles.push({ name: base, type: fileType, content })
     } catch { /* Ignore */ }
   }
+  console.log(`[Extract] 文件组 ${groupBaseName} 读取到文件数：${contentFiles.length}`)
   return { name: groupBaseName, files: contentFiles, chat, solution, filePath: filePaths }
 }
 
@@ -193,6 +194,7 @@ export async function readDirectory(dirPath: string): Promise<FileGroup[]> {
     fileGroup.filePath = [dirName]
     groups.push(fileGroup)
   }
+  console.log(`[Extract] 目录 ${dirPath} 读取到文件组数：${groups.length}`)
   return groups
 }
 
@@ -283,6 +285,7 @@ export function extractTags(group: FileGroup): ExtractedTags {
     for (const mod of mods) addUniqueTag(tags.mod, mod)
   }
   tags.mod.push(...Array.from(modPackages))
+  console.log(`[Extract] ${group.name} 提取到标签：version = ${tags.version}, loader = ${tags.loader}, error = ${tags.error}, mod = ${tags.mod.length}`)
   return tags
 }
 

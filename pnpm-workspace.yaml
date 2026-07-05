@@ -1,6 +1,10 @@
 onlyBuiltDependencies:
+  - '@parcel/watcher'
   - better-sqlite3
+  - esbuild
   - onnxruntime-node
   - protobufjs
   - sharp
   - tree-sitter
+  - unrs-resolver
+  - vue-demi

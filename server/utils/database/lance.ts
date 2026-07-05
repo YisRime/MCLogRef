@@ -25,6 +25,7 @@ export async function getLanceConnection(): Promise<Connection> {
   const path = getDbPath()
   const dir = getConfig('dataDir')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  console.log(`[LanceDB] 初始化数据库: ${path}`)
   connection = await connect(path)
   return connection
 }

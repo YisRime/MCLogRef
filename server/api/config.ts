@@ -6,6 +6,7 @@ export default defineEventHandler(async (event) => {
   if (method === 'PATCH') {
     const body = await readBody(event)
     if (!body || typeof body !== 'object') return { status: 400, data: { message: 'Invalid Request Body' } }
+    console.log(`[API] 更新配置：${Object.keys(body)}`)
     setConfig(body)
     return { status: 200, data: getConfig() }
   }

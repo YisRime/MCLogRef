@@ -38,8 +38,10 @@
         <span>选项</span>
       </NuxtLink>
     </nav>
-    <main :class="[$route.path === '/' ? 'h-full relative z-10' : 'mt-20 px-6 pb-6 relative z-10 max-w-6xl mx-auto w-full flex-1 overflow-y-auto']">
-      <NuxtPage />
+    <main :class="[$route.path === '/' ? 'h-full relative z-10' : 'relative z-10 flex-1 overflow-y-auto']">
+      <div :class="[$route.path === '/' ? 'w-3/5 mx-auto' : 'w-4/5 mx-auto']">
+        <NuxtPage />
+      </div>
     </main>
   </div>
 </template>

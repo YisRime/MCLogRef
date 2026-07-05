@@ -21,7 +21,9 @@
     "jszip": "^3.10.1",
     "llamaindex": "^0.12.1",
     "nuxt": "^4.4.8",
+    "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
+    "undici": "^8.7.0",
     "vue": "^3.5.38"
   },
   "devDependencies": {
