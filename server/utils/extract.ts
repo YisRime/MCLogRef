@@ -107,95 +107,139 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
   let solution: SolutionRecord | undefined
   const groupBaseName = extractGroupKey(filePaths[0]!)
   for (const filePath of filePaths) {
-    const fullPath = join(basePath, filePath)
-    const base = basename(filePath)
-    const ext = extname(filePath).toLowerCase()
-    if (ext === '.json') {
+    try {
+      const fullPath = join(basePath, filePath)
+      const base = basename(filePath)
+      const ext = extname(filePath).toLowerCase()
+      if (ext === '.json') {
+        try {
+          const content = await readFile(fullPath, 'utf-8')
+          const json = JSON.parse(content)
+          if (base === `${groupBaseName}.solution.json` || json.has_solution !== undefined) {
+            solution = normalizeSolution(json)
+            continue
+          }
+          if (base === `${groupBaseName}.json` && json.recordId && json.messages) {
+            chat = json as ChatRecord
+            contentFiles.push({ name: base, type: 'discuss', content })
+            continue
+          }
+        } catch (err) {
+          console.log(`[Extract] 解析 ${filePath} 失败：`, err)
+        }
+      }
+      if (ext === '.zip') {
+        try {
+          const zipFiles = await readZipFile(fullPath)
+          for (const zf of zipFiles) {
+            if (zf.name.endsWith('.solution.json')) {
+              try { solution = normalizeSolution(JSON.parse(zf.content)) } catch (err) {
+                console.log(`[Extract] 解析 ${zf.name}(ZIP) 失败：`, err)
+              }
+              continue
+            }
+            contentFiles.push(zf)
+          }
+        } catch (err) {
+          console.log(`[Extract] 读取 ${filePath} 失败：`, err)
+        }
+        continue
+      }
+      if (/\.(png|jpg|jpeg|gif|bmp)$/i.test(ext)) continue
       try {
         const content = await readFile(fullPath, 'utf-8')
-        const json = JSON.parse(content)
-        if (base === `${groupBaseName}.solution.json` || json.has_solution !== undefined) {
-          solution = normalizeSolution(json)
-          continue
-        }
-        if (base === `${groupBaseName}.json` && json.recordId && json.messages) {
-          chat = json as ChatRecord
-          contentFiles.push({ name: base, type: 'discuss', content })
-          continue
-        }
-      } catch { /* Ignore */ }
-    }
-    if (ext === '.zip') {
-      const zipFiles = await readZipFile(fullPath)
-      for (const zf of zipFiles) {
-        if (zf.name.endsWith('.solution.json')) {
-          try { solution = normalizeSolution(JSON.parse(zf.content)) } catch { /* Ignore */ }
-          continue
-        }
-        contentFiles.push(zf)
+        const fileType = detectFileType(base, groupBaseName)
+        contentFiles.push({ name: base, type: fileType, content })
+      } catch (err) {
+        console.log(`[Extract] 读取 ${filePath} 失败：`, err)
       }
-      continue
+    } catch (err) {
+      console.log(`[Extract] 处理 ${filePath} 失败：`, err)
     }
-    if (/\.(png|jpg|jpeg|gif|bmp)$/i.test(ext)) continue
-    try {
-      const content = await readFile(fullPath, 'utf-8')
-      const fileType = detectFileType(base, groupBaseName)
-      contentFiles.push({ name: base, type: fileType, content })
-    } catch { /* Ignore */ }
   }
-  console.log(`[Extract] 文件组 ${groupBaseName} 读取到文件数：${contentFiles.length}`)
   return { name: groupBaseName, files: contentFiles, chat, solution, filePath: filePaths }
 }
 
 async function readZipFile(zipPath: string): Promise<GroupFile[]> {
-  const data = await readFile(zipPath)
-  const zip = await JSZip.loadAsync(data)
-  const files: GroupFile[] = []
-  const zipBaseName = basename(zipPath).replace(/\.zip$/i, '')
-  for (const [path, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue
-    const content = await entry.async('string')
-    const base = basename(path)
-    const fileType = detectFileType(base, zipBaseName)
-    files.push({ name: base, type: fileType, content })
+  try {
+    const data = await readFile(zipPath)
+    const zip = await JSZip.loadAsync(data)
+    const files: GroupFile[] = []
+    const zipBaseName = basename(zipPath).replace(/\.zip$/i, '')
+    for (const [path, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue
+      try {
+        const content = await entry.async('string')
+        const base = basename(path)
+        const fileType = detectFileType(base, zipBaseName)
+        files.push({ name: base, type: fileType, content })
+      } catch (err) {
+        console.log(`[Extract] 读取 ${path}(ZIP) 失败：`, err)
+      }
+    }
+    return files
+  } catch (err) {
+    console.log(`[Extract] 加载 ${zipPath} 失败：`, err)
+    return []
   }
-  return files
 }
 
 export async function readDirectory(dirPath: string): Promise<FileGroup[]> {
-  const entries = await readdir(dirPath)
-  const groups: FileGroup[] = []
-  const topLevelFiles: string[] = []
-  const subDirs: Map<string, string[]> = new Map()
-  for (const entry of entries) {
-    const fullPath = join(dirPath, entry)
-    const stats = await stat(fullPath)
-    if (stats.isDirectory()) {
-      const subFiles = await readdir(fullPath)
-      subDirs.set(entry, subFiles.map(f => join(entry, f)))
-    } else {
-      if (entry.endsWith('.zip')) {
-        try {
-          const group = await readFileGroup([entry], dirPath)
-          groups.push(group)
-        } catch { /* Ignore */ }
-      } else {
-        topLevelFiles.push(entry)
+  try {
+    const entries = await readdir(dirPath)
+    const groups: FileGroup[] = []
+    const topLevelFiles: string[] = []
+    const subDirs: Map<string, string[]> = new Map()
+    for (const entry of entries) {
+      try {
+        const fullPath = join(dirPath, entry)
+        const stats = await stat(fullPath)
+        if (stats.isDirectory()) {
+          try {
+            const subFiles = await readdir(fullPath)
+            subDirs.set(entry, subFiles.map(f => join(entry, f)))
+          } catch (err) {
+            console.log(`[Extract] 读取 ${entry} 子目录失败：`, err)
+          }
+        } else {
+          if (entry.endsWith('.zip')) {
+            try {
+              const group = await readFileGroup([entry], dirPath)
+              groups.push(group)
+            } catch (err) {
+              console.log(`[Extract] 读取 ${entry} 文件组失败：`, err)
+            }
+          } else {
+            topLevelFiles.push(entry)
+          }
+        }
+      } catch (err) {
+        console.log(`[Extract] 处理 ${entry} 失败：`, err)
       }
     }
+    const groupedTopLevel = identifyFileGroup(topLevelFiles)
+    for (const group of groupedTopLevel) {
+      try {
+        const fileGroup = await readFileGroup(group, dirPath)
+        groups.push(fileGroup)
+      } catch (err) {
+        console.log(`[Extract] 读取 ${group} 文件组失败：`, err)
+      }
+    }
+    for (const [dirName, files] of subDirs.entries()) {
+      try {
+        const fileGroup = await readFileGroup(files, dirPath)
+        fileGroup.filePath = [dirName]
+        groups.push(fileGroup)
+      } catch (err) {
+        console.log(`[Extract] 读取 ${dirName} 子目录文件组失败：`, err)
+      }
+    }
+    return groups
+  } catch (err) {
+    console.log(`[Extract] 读取 ${dirPath} 失败：`, err)
+    return []
   }
-  const groupedTopLevel = identifyFileGroup(topLevelFiles)
-  for (const group of groupedTopLevel) {
-    const fileGroup = await readFileGroup(group, dirPath)
-    groups.push(fileGroup)
-  }
-  for (const [dirName, files] of subDirs.entries()) {
-    const fileGroup = await readFileGroup(files, dirPath)
-    fileGroup.filePath = [dirName]
-    groups.push(fileGroup)
-  }
-  console.log(`[Extract] 目录 ${dirPath} 读取到文件组数：${groups.length}`)
-  return groups
 }
 
 const VERSION_PATTERNS = [/Minecraft(?:\s+Version)?(?:\s+ID)?[\s:]+([\d.]+(?:-pre\d+)?(?:-rc\d+)?)/i]

@@ -49,17 +49,22 @@ function readConfigFile(): Partial<AppConfig> {
   try {
     const content = readFileSync(path, 'utf-8')
     return JSON.parse(content)
-  } catch {
+  } catch (err) {
+    console.log('[Config] 读取配置失败：', err)
     return {}
   }
 }
 
 function writeConfigFile(config: Partial<AppConfig>): void {
-  ensureDataDir()
-  const path = getConfigPath()
-  const existing = readConfigFile()
-  const merged = { ...existing, ...config }
-  writeFileSync(path, JSON.stringify(merged, null, 2), 'utf-8')
+  try {
+    ensureDataDir()
+    const path = getConfigPath()
+    const existing = readConfigFile()
+    const merged = { ...existing, ...config }
+    writeFileSync(path, JSON.stringify(merged, null, 2), 'utf-8')
+  } catch (err) {
+    console.log('[Config] 更新配置失败：', err)
+  }
 }
 
 export function getConfig(): AppConfig

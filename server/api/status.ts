@@ -39,31 +39,36 @@ function getDiskSize(): number {
 }
 
 export default defineEventHandler(async (event) => {
-  if (event.method === 'GET') incrementStat('visits')
-  const db = getDatabase()
-  const vectorCount = await getCount().catch(() => 0)
-  const mem = process.memoryUsage()
-  const counts = db.prepare(`
-    SELECT 
-      (SELECT COUNT(*) FROM reports) as reports,
-      (SELECT COUNT(*) FROM reports WHERE status = 2) as user,
-      (SELECT COUNT(*) FROM reports WHERE status = 1) as admin,
-      (SELECT COUNT(*) FROM reports WHERE timestamp >= ?) as today,
-      (SELECT COUNT(*) FROM reports WHERE timestamp >= ?) as week,
-      (SELECT COUNT(*) FROM files) as files,
-      (SELECT COUNT(*) FROM files WHERE type = 'crash') as crash,
-      (SELECT COUNT(*) FROM files WHERE type = 'gamelog') as gamelog,
-      (SELECT COUNT(*) FROM files WHERE type = 'log') as log,
-      (SELECT COUNT(*) FROM files WHERE type = 'discuss') as discuss,
-      (SELECT COUNT(*) FROM files WHERE type = 'other') as other
-  `).get(Math.floor(Date.now() / 1000) - 86400, Math.floor(Date.now() / 1000) - 604800) as Status
-  return {
-    status: 200,
-    data: {
-      reports: { total: counts.reports, user: counts.user, admin: counts.admin, today: counts.today, week: counts.week },
-      files: { total: counts.files, crash: counts.crash, gamelog: counts.gamelog, log: counts.log, discuss: counts.discuss, other: counts.other },
-      vectors: vectorCount, visits: getStat('visits'), analyses: getStat('analyses'), uploads: getStat('user_uploads'), cpu: os.loadavg()[0]!.toFixed(2), disk: formatBytes(getDiskSize()),
-      memory: { percent: ((mem.heapUsed / mem.heapTotal) * 100).toFixed(1), used: formatBytes(mem.heapUsed), total: formatBytes(mem.heapTotal) },
-    },
+  try {
+    if (event.method === 'GET') incrementStat('visits')
+    const db = getDatabase()
+    const vectorCount = await getCount().catch(() => 0)
+    const mem = process.memoryUsage()
+    const counts = db.prepare(`
+      SELECT 
+        (SELECT COUNT(*) FROM reports) as reports,
+        (SELECT COUNT(*) FROM reports WHERE status = 2) as user,
+        (SELECT COUNT(*) FROM reports WHERE status = 1) as admin,
+        (SELECT COUNT(*) FROM reports WHERE timestamp >= ?) as today,
+        (SELECT COUNT(*) FROM reports WHERE timestamp >= ?) as week,
+        (SELECT COUNT(*) FROM files) as files,
+        (SELECT COUNT(*) FROM files WHERE type = 'crash') as crash,
+        (SELECT COUNT(*) FROM files WHERE type = 'gamelog') as gamelog,
+        (SELECT COUNT(*) FROM files WHERE type = 'log') as log,
+        (SELECT COUNT(*) FROM files WHERE type = 'discuss') as discuss,
+        (SELECT COUNT(*) FROM files WHERE type = 'other') as other
+    `).get(Math.floor(Date.now() / 1000) - 86400, Math.floor(Date.now() / 1000) - 604800) as Status
+    return {
+      status: 200,
+      data: {
+        reports: { total: counts.reports, user: counts.user, admin: counts.admin, today: counts.today, week: counts.week },
+        files: { total: counts.files, crash: counts.crash, gamelog: counts.gamelog, log: counts.log, discuss: counts.discuss, other: counts.other },
+        vectors: vectorCount, visits: getStat('visits'), analyses: getStat('analyses'), uploads: getStat('user_uploads'), cpu: os.loadavg()[0]!.toFixed(2), disk: formatBytes(getDiskSize()),
+        memory: { percent: ((mem.heapUsed / mem.heapTotal) * 100).toFixed(1), used: formatBytes(mem.heapUsed), total: formatBytes(mem.heapTotal) },
+      },
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Get Status Failed'
+    return { status: 500, data: { message } }
   }
 })

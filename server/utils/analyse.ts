@@ -81,28 +81,37 @@ function extractSignature(content: string): string {
 }
 
 export async function buildContext(rid: number): Promise<AnalysisContext> {
-  const { searchLimit } = getConfig()
-  const report = getReport(rid)
-  if (!report) throw new Error(`Report ${rid} Not Found`)
-  const files = getFilesByReport(rid)
-  const tags = getTagsByReport(rid)
-  const crashFile = files.find(f => f.type === 'crash' || f.type === 'gamelog') ?? files[0]
-  const mainContent = crashFile ? extractSignature(crashFile.content) : report.name
-  const filter: Record<string, string> = {}
-  const loaderTag = tags.find(t => t.type === 'loader')
-  if (loaderTag) filter.loader = loaderTag.value
-  const versionTag = tags.find(t => t.type === 'version')
-  if (versionTag) filter.version = versionTag.value
-  const errorTag = tags.find(t => t.type === 'error')
-  if (errorTag) filter.error = errorTag.value
-  const searchResults = await searchSimilar(mainContent, searchLimit, filter)
-  const similarCases: SimilarCase[] = []
-  for (const r of searchResults) {
-    const historyReport = getReport(r.rid)
-    if (historyReport && historyReport.solution) similarCases.push({ rid: r.rid, text: r.text, meta: r.meta, solution: historyReport.solution })
+  try {
+    const { searchLimit } = getConfig()
+    const report = getReport(rid)
+    if (!report) throw new Error(`Report ${rid} Not Found`)
+    const files = getFilesByReport(rid)
+    const tags = getTagsByReport(rid)
+    const crashFile = files.find(f => f.type === 'crash' || f.type === 'gamelog') ?? files[0]
+    const mainContent = crashFile ? extractSignature(crashFile.content) : report.name
+    const filter: Record<string, string> = {}
+    const loaderTag = tags.find(t => t.type === 'loader')
+    if (loaderTag) filter.loader = loaderTag.value
+    const versionTag = tags.find(t => t.type === 'version')
+    if (versionTag) filter.version = versionTag.value
+    const errorTag = tags.find(t => t.type === 'error')
+    if (errorTag) filter.error = errorTag.value
+    const searchResults = await searchSimilar(mainContent, searchLimit, filter)
+    const similarCases: SimilarCase[] = []
+    for (const r of searchResults) {
+      try {
+        const historyReport = getReport(r.rid)
+        if (historyReport && historyReport.solution) similarCases.push({ rid: r.rid, text: r.text, meta: r.meta, solution: historyReport.solution })
+      } catch (err) {
+        console.log(`[Analyse] 获取 ${r.rid} 日志失败：`, err)
+      }
+    }
+    console.log(`[Analyse] ${rid} 相似案例数: ${similarCases.length}`)
+    return { report, files, tags, similarCases, mainContent }
+  } catch (err) {
+    console.log(`[Analyse] 构建 ${rid} 上下文失败：`, err)
+    throw err
   }
-  console.log(`[Analyse] ${rid} 相似案例数: ${similarCases.length}`)
-  return { report, files, tags, similarCases, mainContent }
 }
 
 export function buildPrompt(context: AnalysisContext): string {
@@ -125,58 +134,64 @@ export interface AnalysisResult {
 }
 
 export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult> {
-  console.log(`[Analyse] 开始分析报告: ${rid}`)
-  const context = await buildContext(rid)
-  const prompt = buildPrompt(context)
-  const { apiUrl, apiKey, apiModel, temperature } = getConfig()
-  if (!apiUrl || !apiKey || !apiModel) {
-    yield { content: 'Error: LLM API Not Configured', done: true }
-    return
-  }
+  console.log(`[Analyse] 开始分析日志: ${rid}`)
   try {
-    const response = await fetch(`${apiUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: apiModel, stream: true, temperature: temperature,
-        messages: [ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: prompt }],
-      }),
-    })
-    if (!response.ok) {
-      yield { content: `Error: LLM API Request Failed with ${response.status}`, done: true }
+    const context = await buildContext(rid)
+    const prompt = buildPrompt(context)
+    const { apiUrl, apiKey, apiModel, temperature } = getConfig()
+    if (!apiUrl || !apiKey || !apiModel) {
+      yield { content: 'Error: LLM API Not Configured', done: true }
       return
     }
-    const reader = response.body?.getReader()
-    if (!reader) {
-      yield { content: 'Error: Unable to Read Response Stream', done: true }
-      return
-    }
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-        const data = trimmed.slice(6)
-        if (data === '[DONE]') {
-          console.log(`[Analyse] 报告 ${rid} 分析完成`)
-          yield { content: '', done: true }
-          return
-        }
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) yield { content, done: false }
-        } catch { /* Ignore */ }
+    try {
+      const response = await fetch(`${apiUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: apiModel, stream: true, temperature: temperature,
+          messages: [ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: prompt }],
+        }),
+      })
+      if (!response.ok) {
+        yield { content: `Error: LLM API Request Failed with ${response.status}`, done: true }
+        return
       }
+      const reader = response.body?.getReader()
+      if (!reader) {
+        yield { content: 'Error: Unable to Read Response Stream', done: true }
+        return
+      }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data: ')) continue
+          const data = trimmed.slice(6)
+          if (data === '[DONE]') {
+            console.log(`[Analyse] 日志 ${rid} 分析完成`)
+            yield { content: '', done: true }
+            return
+          }
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed.choices?.[0]?.delta?.content
+            if (content) yield { content, done: false }
+          } catch (err) {
+            console.log('[Analyse] 数据解析失败：', err)
+          }
+        }
+      }
+    } catch (error) {
+      yield { content: `\nError: Response Stream Terminated with ${error instanceof Error ? error.message : String(error)}`, done: true }
     }
-  } catch (error) {
-    yield { content: `\nError: Response Stream Terminated with ${error instanceof Error ? error.message : String(error)}`, done: true }
+  } catch (err) {
+    yield { content: `\nError: ${err instanceof Error ? err.message : String(err)}`, done: true }
   }
   yield { content: '', done: true }
 }
