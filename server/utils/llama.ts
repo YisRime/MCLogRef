@@ -66,9 +66,9 @@ export async function vectorizeAndStore(rid: number, content: string, tags: Extr
     const chunks = chunkText(content, meta)
     console.log(`[Llama] 开始向量化 ${rid}(${fileType})，包含 ${chunks.length} 个切片`)
     let insertedCount = 0
-    for (let i = 0; i < chunks.length; i += 10) {
+    for (let i = 0; i < chunks.length; i += 16) {
       try {
-        const batch = chunks.slice(i, i + 10)
+        const batch = chunks.slice(i, i + 16)
         const texts = batch.map(c => c.text)
         const vectors = await embedBatch(texts)
         const records: VectorRecord[] = batch.map((chunk, idx) => ({ id: Date.now() * 1000 + i + idx, rid, meta: chunk.meta, text: chunk.text, vector: vectors[idx] ?? [] }))

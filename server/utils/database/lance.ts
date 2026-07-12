@@ -45,7 +45,10 @@ export async function getTable(): Promise<Table> {
     } else {
       table = await conn.createTable('vectors', [
         {
-          id: 0, rid: 0, meta: {}, text: '',
+          id: 0,
+          rid: 0,
+          meta: { type: '', version: '', loader: '', error: '' },
+          text: '',
           vector: new Array(768).fill(0),
         },
       ])

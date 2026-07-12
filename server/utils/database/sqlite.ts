@@ -254,17 +254,45 @@ export function incrementStat(key: string): void {
   }
 }
 
-export function getGlobalCounts() {
+export function getReportCounts() {
   try {
     const db = getDatabase()
-    const reports = db.prepare('SELECT COUNT(*) as count FROM reports').get() as { count: number }
-    const files = db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number }
-    const userReports = db.prepare('SELECT COUNT(*) as count FROM reports WHERE status = 2').get() as { count: number }
-    const adminReports = db.prepare('SELECT COUNT(*) as count FROM reports WHERE status = 1').get() as { count: number }
-    return { reports: reports.count, files: files.count, userReports: userReports.count, adminReports: adminReports.count }
+    const nowTs = Math.floor(Date.now() / 1000)
+    const todayTs = nowTs - 86400
+    const weekTs = nowTs - 604800
+    const result = db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as user,
+        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as admin,
+        SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END) as today,
+        SUM(CASE WHEN timestamp >= ? THEN 1 ELSE 0 END) as week
+      FROM reports
+    `).get(todayTs, weekTs)
+    return result as { total: number; user: number; admin: number; today: number; week: number }
   } catch (err) {
-    console.log('[SQLite] 状态查询失败：', err)
-    return { reports: 0, files: 0, userReports: 0, adminReports: 0 }
+    console.log('[SQLite] 日志统计查询失败：', err)
+    return { total: 0, user: 0, admin: 0, today: 0, week: 0 }
+  }
+}
+
+export function getFileCounts() {
+  try {
+    const db = getDatabase()
+    const result = db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN type = 'crash' THEN 1 ELSE 0 END) as crash,
+        SUM(CASE WHEN type = 'gamelog' THEN 1 ELSE 0 END) as gamelog,
+        SUM(CASE WHEN type = 'log' THEN 1 ELSE 0 END) as log,
+        SUM(CASE WHEN type = 'discuss' THEN 1 ELSE 0 END) as discuss,
+        SUM(CASE WHEN type = 'other' THEN 1 ELSE 0 END) as other
+      FROM files
+    `).get()
+    return result as { total: number; crash: number; gamelog: number; log: number; discuss: number; other: number }
+  } catch (err) {
+    console.log('[SQLite] 文件统计查询失败：', err)
+    return { total: 0, crash: 0, gamelog: 0, log: 0, discuss: 0, other: 0 }
   }
 }
 
