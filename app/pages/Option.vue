@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col gap-6 pt-8">
+  <div class="flex flex-col gap-6 p-8 h-screen w-full">
     <div class="flex items-center justify-between">
       <div>
         <h2 class="text-3xl font-bold text-slate-800">配置选项</h2>

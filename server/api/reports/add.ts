@@ -6,10 +6,18 @@ import { getConfig } from '../../utils/config'
 import { embedBatch } from '../../utils/llama'
 import { insertVectors, deleteByReport, type VectorRecord } from '../../utils/database/lance'
 
+let importing = false
+
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ dir?: string }>(event).catch(() => ({ dir: undefined }))
+  if (event.method === 'GET') return { status: 200, data: { importing: importing } }
+  const body = await readBody<{ action?: 'start' | 'cancel' }>(event).catch(() => ({ action: 'start' as const }))
+  if (body.action === 'cancel') {
+    importing = false
+    return { status: 200, data: { message: '正在取消...' } }
+  }
+  importing = true
   const dataDir = getConfig('dataDir')
-  const scanPath = body.dir ?? join(dataDir, 'temp')
+  const scanPath = join(dataDir, 'temp')
   setResponseHeaders(event, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' })
   const stream = new ReadableStream({
     async start(controller) {
@@ -59,42 +67,54 @@ export default defineEventHandler(async (event) => {
             const fileGroup = await readFileGroup(item.filePaths, scanPath)
             const existing = getReportByName(fileGroup.name)
             if (existing) {
-              if (existing.status === 1 || existing.status === 2) return { status: 'skipped' }
+              if (existing.status === 1 || existing.status === 2) {
+                for (const filePath of item.filePaths) {
+                  const sourcePath = join(scanPath, filePath)
+                  const destPath = join(adminDir, filePath)
+                  if (existsSync(sourcePath)) renameSync(sourcePath, destPath)
+                }
+                return { status: 'skipped' }
+              }
               deleteReport(existing.id)
               await deleteByReport(existing.id)
             }
             const reportId = createReport(fileGroup.name)
-            updateReport(reportId, { status: 0 })
-            const tags = extractTags(fileGroup)
-            for (const tag of tags.version) createTag(reportId, 'version', tag)
-            for (const tag of tags.loader) createTag(reportId, 'loader', tag)
-            for (const tag of tags.error) createTag(reportId, 'error', tag)
-            for (const tag of tags.mod) createTag(reportId, 'mod', tag)
-            for (const file of fileGroup.files) createFile(reportId, file.name, file.type, file.content)
-            if (fileGroup.solution) updateReport(reportId, { solution: fileGroup.solution.solution })
-            const chunks: Array<{ text: string; meta: Record<string, string> }> = []
-            for (const file of fileGroup.files) {
-              const meta: Record<string, string> = { type: file.type }
-              if (tags.version[0]) meta.version = tags.version[0]
-              if (tags.loader[0]) meta.loader = tags.loader[0]
-              if (tags.error[0]) meta.error = tags.error[0]
-              chunks.push(...chunkText(file.content, meta))
+            try {
+              updateReport(reportId, { status: 0 })
+              const tags = extractTags(fileGroup)
+              for (const tag of tags.version) createTag(reportId, 'version', tag)
+              for (const tag of tags.loader) createTag(reportId, 'loader', tag)
+              for (const tag of tags.error) createTag(reportId, 'error', tag)
+              for (const tag of tags.mod) createTag(reportId, 'mod', tag)
+              for (const file of fileGroup.files) createFile(reportId, file.name, file.type, file.content)
+              if (fileGroup.solution) updateReport(reportId, { solution: fileGroup.solution.solution })
+              const chunks: Array<{ text: string; meta: Record<string, string> }> = []
+              for (const file of fileGroup.files) {
+                const meta: Record<string, string> = { type: file.type }
+                if (tags.version[0]) meta.version = tags.version[0]
+                if (tags.loader[0]) meta.loader = tags.loader[0]
+                if (tags.error[0]) meta.error = tags.error[0]
+                chunks.push(...chunkText(file.content, meta))
+              }
+              for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 16) {
+                const chunkBatch = chunks.slice(chunkIndex, chunkIndex + 16)
+                const texts = chunkBatch.map(chunk => chunk.text)
+                const vectors = await embedBatch(texts)
+                const records: VectorRecord[] = chunkBatch.map((chunk, idx) => ({ id: Date.now() * 1000 + chunkIndex + idx, rid: reportId, meta: chunk.meta, text: chunk.text, vector: vectors[idx] ?? [] }))
+                await insertVectors(records)
+              }
+              for (const filePath of item.filePaths) {
+                const sourcePath = join(scanPath, filePath)
+                const destPath = join(adminDir, filePath)
+                if (existsSync(sourcePath)) renameSync(sourcePath, destPath)
+              }
+              updateReport(reportId, { status: 1 })
+              return { status: 'success' }
+            } catch (error) {
+              deleteReport(reportId)
+              await deleteByReport(reportId)
+              throw error
             }
-            for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 16) {
-              const chunkBatch = chunks.slice(chunkIndex, chunkIndex + 16)
-              const texts = chunkBatch.map(chunk => chunk.text)
-              const vectors = await embedBatch(texts)
-              const records: VectorRecord[] = chunkBatch.map((chunk, idx) => ({ id: Date.now() * 1000 + chunkIndex + idx, rid: reportId, meta: chunk.meta, text: chunk.text, vector: vectors[idx] ?? [] }))
-              await insertVectors(records)
-              if ((chunkIndex + 16) % 160 === 0 || chunkIndex + 16 >= chunks.length) send(`向量化 ${fileGroup.name}: ${Math.min(chunkIndex + 16, chunks.length)}/${chunks.length} 块`, false, { reportName: fileGroup.name, currentChunk: Math.min(chunkIndex + 16, chunks.length), totalChunks: chunks.length })
-            }
-            for (const filePath of item.filePaths) {
-              const sourcePath = join(scanPath, filePath)
-              const destPath = join(adminDir, filePath)
-              if (existsSync(sourcePath)) renameSync(sourcePath, destPath)
-            }
-            updateReport(reportId, { status: 1 })
-            return { status: 'success' }
           }))
           for (const result of results) {
             if (result.status === 'fulfilled') {
@@ -104,13 +124,18 @@ export default defineEventHandler(async (event) => {
               failedCount++
             }
           }
-          if ((offset + batch.length) % 100 === 0 || offset + batch.length === validItems.length) send(`处理中: ${offset + batch.length}/${validItems.length}`, false, { current: offset + batch.length, total: validItems.length, success: successCount, skipped: skippedCount, failed: failedCount })
+          if ((offset + batch.length) % 10 === 0 || offset + batch.length === validItems.length) send(`处理中: ${offset + batch.length}/${validItems.length}`, false, { current: offset + batch.length, total: validItems.length, success: successCount, skipped: skippedCount, failed: failedCount })
+          if (!importing) {
+            send(`导入取消，成功 ${successCount} 项（跳过 ${skippedCount} 项，失败 ${failedCount} 项）`, true, { cancelled: true, success: successCount, skipped: skippedCount, failed: failedCount })
+            return
+          }
         }
         send(`导入完成，成功 ${successCount} 项（跳过 ${skippedCount} 项，失败 ${failedCount} 项）`, true, { success: successCount, skipped: skippedCount, failed: failedCount })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Import Failed'
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 500, data: { message } })}\n\n`))
       } finally {
+        importing = false
         controller.close()
       }
     },
