@@ -80,7 +80,7 @@
                 </div>
               </div>
               <div class="flex items-center gap-3 shrink-0">
-                <Button variant="secondary" size="icon" class="text-slate-400 hover:text-rose-500 hover:bg-rose-50 hover:border-rose-200" :disabled="status !== 'idle'" @click.stop="reset">
+                <Button variant="secondary" size="icon" class="text-slate-400 hover:text-rose-500 hover:bg-rose-50 hover:border-rose-200" :disabled="status === 'uploading' || status === 'analyzing'" @click.stop="reset">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                   </svg>

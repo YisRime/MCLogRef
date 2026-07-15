@@ -1,6 +1,6 @@
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers'
 import { insertVectors, searchVectors, type VectorRecord } from './database/lance'
-import { chunkText, type ExtractedTags } from './extract'
+import { chunkText, type ExtractedTags, type GroupFile } from './extract'
 import { join } from 'path'
 import { getConfig } from './config'
 import { setGlobalDispatcher, ProxyAgent } from 'undici'
@@ -38,12 +38,8 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
     if (!embeddingModel) await loadEmbeddingModel()
     const vectors: number[][] = []
     for (const text of texts) {
-      try {
-        const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
-        vectors.push(Array.from(output.data as Float32Array))
-      } catch (err) {
-        console.log('[Llama] 嵌入失败：', err)
-      }
+      const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
+      vectors.push(Array.from(output.data as Float32Array))
     }
     return vectors
   } catch (err) {
@@ -52,38 +48,24 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
   }
 }
 
-export interface Document {
-  text: string
-  meta: Record<string, string>
-}
-
-export async function vectorizeAndStore(rid: number, content: string, tags: ExtractedTags, fileType: string): Promise<number> {
-  try {
-    const meta: Record<string, string> = { type: fileType }
-    if (tags.version.length > 0 && tags.version[0]) meta.version = tags.version[0]
-    if (tags.loader.length > 0 && tags.loader[0]) meta.loader = tags.loader[0]
-    if (tags.error.length > 0 && tags.error[0]) meta.error = tags.error[0]
-    const chunks = chunkText(content, meta)
-    console.log(`[Llama] 开始向量化 ${rid}(${fileType})，包含 ${chunks.length} 个切片`)
-    let insertedCount = 0
-    for (let i = 0; i < chunks.length; i += 16) {
-      try {
-        const batch = chunks.slice(i, i + 16)
-        const texts = batch.map(c => c.text)
-        const vectors = await embedBatch(texts)
-        const records: VectorRecord[] = batch.map((chunk, idx) => ({ id: Date.now() * 1000 + i + idx, rid, meta: chunk.meta, text: chunk.text, vector: vectors[idx] ?? [] }))
-        await insertVectors(records)
-        insertedCount += records.length
-      } catch (err) {
-        console.log(`[Llama] ${i}/${rid} 向量化失败：`, err)
-      }
-    }
-    console.log(`[Llama] ${rid} 向量化完成, 新增 ${insertedCount} 条记录`)
-    return insertedCount
-  } catch (err) {
-    console.log(`[Llama] ${rid} 向量化失败：`, err)
-    throw err
+export async function vectorizeFiles(rid: number, files: GroupFile[], tags: ExtractedTags, label: string): Promise<number> {
+  const chunks = files.flatMap((file) => {
+    const meta: Record<string, string> = { type: file.type }
+    if (tags.version[0]) meta.version = tags.version[0]
+    if (tags.loader[0]) meta.loader = tags.loader[0]
+    if (tags.error[0]) meta.error = tags.error[0]
+    return chunkText(file.content, meta)
+  })
+  console.log(`[Llama] 开始向量化 ${label}(${rid})，共 ${files.length} 个文件，包含 ${chunks.length} 个切片`)
+  for (let i = 0; i < chunks.length; i += 16) {
+    const batch = chunks.slice(i, i + 16)
+    const vectors = await embedBatch(batch.map(chunk => chunk.text))
+    if (vectors.length !== batch.length) throw new Error(`[Llama] 向量化失败：预期 ${batch.length} 个向量，实际 ${vectors.length} 个`)
+    const records: VectorRecord[] = batch.map((chunk, idx) => ({ id: Date.now() * 1000 + i + idx, rid, meta: chunk.meta, text: chunk.text, vector: vectors[idx]! }))
+    await insertVectors(records)
   }
+  console.log(`[Llama] ${label}(${rid}) 向量化完成，新增 ${chunks.length} 条记录`)
+  return chunks.length
 }
 
 export interface SearchResult {

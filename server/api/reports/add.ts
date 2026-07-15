@@ -1,10 +1,10 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, renameSync } from 'fs'
-import { readFileGroup, extractTags, chunkText, scanDirectory } from '../../utils/extract'
+import { readFileGroup, extractTags, scanDirectory } from '../../utils/extract'
 import { getReportByName, createReport, createFile, createTag, updateReport, deleteReport } from '../../utils/database/sqlite'
 import { getConfig } from '../../utils/config'
-import { embedBatch } from '../../utils/llama'
-import { insertVectors, deleteByReport, type VectorRecord } from '../../utils/database/lance'
+import { deleteByReport } from '../../utils/database/lance'
+import { vectorizeFiles } from '../../utils/llama'
 
 let importing = false
 
@@ -88,21 +88,7 @@ export default defineEventHandler(async (event) => {
               for (const tag of tags.mod) createTag(reportId, 'mod', tag)
               for (const file of fileGroup.files) createFile(reportId, file.name, file.type, file.content)
               if (fileGroup.solution) updateReport(reportId, { solution: fileGroup.solution.solution })
-              const chunks: Array<{ text: string; meta: Record<string, string> }> = []
-              for (const file of fileGroup.files) {
-                const meta: Record<string, string> = { type: file.type }
-                if (tags.version[0]) meta.version = tags.version[0]
-                if (tags.loader[0]) meta.loader = tags.loader[0]
-                if (tags.error[0]) meta.error = tags.error[0]
-                chunks.push(...chunkText(file.content, meta))
-              }
-              for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 16) {
-                const chunkBatch = chunks.slice(chunkIndex, chunkIndex + 16)
-                const texts = chunkBatch.map(chunk => chunk.text)
-                const vectors = await embedBatch(texts)
-                const records: VectorRecord[] = chunkBatch.map((chunk, idx) => ({ id: Date.now() * 1000 + chunkIndex + idx, rid: reportId, meta: chunk.meta, text: chunk.text, vector: vectors[idx] ?? [] }))
-                await insertVectors(records)
-              }
+              await vectorizeFiles(reportId, fileGroup.files, tags, fileGroup.name)
               for (const filePath of item.filePaths) {
                 const sourcePath = join(scanPath, filePath)
                 const destPath = join(adminDir, filePath)

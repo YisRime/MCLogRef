@@ -41,6 +41,26 @@ export interface TextChunk {
   priority: number
 }
 
+export function decodeFile(data: Uint8Array): string {
+  const sample = data.subarray(0, Math.min(data.length, 512))
+  let evenNulBytes = 0
+  let oddNulBytes = 0
+  for (let i = 0; i < sample.length; i++) {
+    if (sample[i] !== 0) continue
+    if (i % 2 === 0) evenNulBytes++
+    else oddNulBytes++
+  }
+  if (data[0] === 0xff && data[1] === 0xfe) return new TextDecoder('utf-16le').decode(data)
+  if (data[0] === 0xfe && data[1] === 0xff) return new TextDecoder('utf-16be').decode(data)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch {
+    const pairCount = Math.max(1, Math.floor(sample.length / 2))
+    const encoding = oddNulBytes / pairCount > 0.3 ? 'utf-16le' : evenNulBytes / pairCount > 0.3 ? 'utf-16be' : 'gb18030'
+    return new TextDecoder(encoding).decode(data)
+  }
+}
+
 export function extractGroupKey(filepath: string): string {
   const base = basename(filepath)
   if (base.endsWith('.solution.json')) return base.slice(0, -14)
@@ -112,7 +132,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
       const ext = extname(filePath).toLowerCase()
       if (ext === '.json') {
         try {
-          const content = await readFile(fullPath, 'utf-8')
+          const content = decodeFile(await readFile(fullPath))
           if (base === `${groupBaseName}.solution.json`) {
             try {
               const json = JSON.parse(content)
@@ -158,7 +178,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
       }
       if (/\.(png|jpg|jpeg|gif|bmp)$/i.test(ext)) continue
       try {
-        const content = await readFile(fullPath, 'utf-8')
+        const content = decodeFile(await readFile(fullPath))
         const fileType = detectFileType(base, groupBaseName)
         contentFiles.push({ name: base, type: fileType, content })
       } catch (err) {
@@ -171,26 +191,28 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
   return { name: groupBaseName, files: contentFiles, chat, solution, filePath: filePaths }
 }
 
-async function readZipFile(zipPath: string): Promise<GroupFile[]> {
+export async function readZipFile(input: string | Uint8Array, source?: string): Promise<GroupFile[]> {
+  const zipSource = typeof input === 'string' ? input : source
+  if (!zipSource) throw new Error('ZIP source name is required for byte input')
   try {
-    const data = await readFile(zipPath)
+    const data = typeof input === 'string' ? await readFile(input) : input
     const zip = await JSZip.loadAsync(data)
     const files: GroupFile[] = []
-    const zipBaseName = basename(zipPath).replace(/\.zip$/i, '')
+    const zipBaseName = basename(zipSource).replace(/\.zip$/i, '')
     for (const [path, entry] of Object.entries(zip.files)) {
-      if (entry.dir) continue
+      if (entry.dir || /\.(png|jpg|jpeg|gif|bmp|class|jar|dll|exe)$/i.test(path)) continue
       try {
-        const content = await entry.async('string')
+        const content = decodeFile(await entry.async('uint8array'))
         const base = basename(path)
         const fileType = detectFileType(base, zipBaseName)
         files.push({ name: base, type: fileType, content })
       } catch (err) {
-        console.log(`[Extract] 读取 ${path}(ZIP) 失败：`, err)
+        console.log(`[Extract] 读取 Zip 中 ${path} 失败：`, err)
       }
     }
     return files
   } catch (err) {
-    console.log(`[Extract] 加载 ${zipPath} 失败：`, err)
+    console.log(`[Extract] 加载 ${zipSource} 失败：`, err)
     return []
   }
 }
