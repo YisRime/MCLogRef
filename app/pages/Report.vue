@@ -3,34 +3,33 @@
     <div class="flex items-center justify-between">
       <h2 class="text-3xl font-bold text-slate-800">日志管理</h2>
       <div class="flex items-center gap-3">
-        <button title="上一页" class="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="currentPage === 1" @click="previousPage">
+        <Button title="上一页" variant="secondary" size="icon" :disabled="currentPage === 1" @click="previousPage">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
-        </button>
+        </Button>
         <div class="text-sm text-slate-600 px-2">第 <span class="font-bold text-slate-800">{{ currentPage }}</span> 页</div>
-        <button title="下一页" class="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="!hasMorePages" @click="nextPage">
+        <Button title="下一页" variant="secondary" size="icon" :disabled="!hasMorePages" @click="nextPage">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
-        </button>
+        </Button>
         <div class="w-px h-6 bg-slate-200 mx-1" />
-        <button v-if="selectedIds.size > 0" class="h-9 px-3 rounded-lg bg-white border border-slate-200 flex items-center gap-2 text-rose-500 hover:bg-rose-50 hover:border-rose-300 transition-colors" @click="deleteSelected">
+        <Button v-if="selectedIds.size > 0" variant="secondary" size="icon" class="text-rose-500 hover:bg-rose-50 hover:border-rose-300" @click="deleteSelected">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
-          <span class="text-sm font-medium">{{ selectedIds.size }}</span>
-        </button>
-        <button title="刷新" class="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors" @click="loadReports">
+        </Button>
+        <Button title="刷新" variant="secondary" size="icon" @click="loadReports">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-        </button>
-        <button title="导入" class="w-9 h-9 rounded-lg bg-cyan-500 border border-cyan-600 flex items-center justify-center text-white hover:bg-cyan-600 transition-colors shadow-sm" @click="showImportModal = true">
+        </Button>
+        <Button title="导入" variant="primary" size="icon" @click="showImportModal = true">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
-        </button>
+        </Button>
       </div>
     </div>
     <Card class="flex flex-col flex-1 min-h-0 overflow-hidden">
