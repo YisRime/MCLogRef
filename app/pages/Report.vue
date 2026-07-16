@@ -3,13 +3,13 @@
     <div class="flex items-center justify-between">
       <h2 class="text-3xl font-bold text-slate-800">日志管理</h2>
       <div class="flex items-center gap-3">
-        <Button title="上一页" variant="secondary" size="icon" :disabled="currentPage === 1" @click="previousPage">
+        <Button title="上一页" variant="secondary" size="icon" :disabled="currentPage === 1" @click="currentPage--; loadReports()">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </Button>
         <div class="text-sm text-slate-600 px-2">第 <span class="font-bold text-slate-800">{{ currentPage }}</span> 页</div>
-        <Button title="下一页" variant="secondary" size="icon" :disabled="!hasMorePages" @click="nextPage">
+        <Button title="下一页" variant="secondary" size="icon" :disabled="!hasMorePages" @click="currentPage++; loadReports()">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
@@ -42,7 +42,7 @@
               <th class="px-3 py-2.5 font-medium text-center w-20">ID</th>
               <th class="px-3 py-2.5 font-medium text-center w-24">状态</th>
               <th class="px-3 py-2.5 font-medium text-center w-12">
-                <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer" :checked="allSelected" @change="toggleSelectAll">
+                <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer" :checked="allSelected" @change="allSelected ? selectedIds.clear() : reports.forEach(report => selectedIds.add(report.id))">
               </th>
             </tr>
           </thead>
@@ -66,7 +66,7 @@
                 </span>
               </td>
               <td class="px-3 py-3 text-center w-12" @click.stop>
-                <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer" :checked="selectedIds.has(report.id)" @change="toggleSelect(report.id)">
+                <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer" :checked="selectedIds.has(report.id)" @change="selectedIds.has(report.id) ? selectedIds.delete(report.id) : selectedIds.add(report.id)">
               </td>
             </tr>
           </tbody>
@@ -204,10 +204,6 @@ const hasMorePages = ref(true)
 const importStats = ref<ImportStats>({ total: 0, success: 0, skipped: 0, failed: 0 })
 
 const allSelected = computed(() => reports.value.length > 0 && reports.value.every(report => selectedIds.value.has(report.id)))
-const toggleSelect = (id: number) => selectedIds.value.has(id) ? selectedIds.value.delete(id) : selectedIds.value.add(id)
-const toggleSelectAll = () => allSelected.value ? selectedIds.value.clear() : reports.value.forEach(report => selectedIds.value.add(report.id))
-const nextPage = () => hasMorePages.value && (currentPage.value++, loadReports())
-const previousPage = () => currentPage.value > 1 && (currentPage.value--, loadReports())
 
 async function viewReport(report: Report) {
   selectedReport.value = report
@@ -215,43 +211,42 @@ async function viewReport(report: Report) {
   reportDetail.value = null
   try {
     const response = await fetch(`/api/reports/info?id=${report.id}`)
-    if (!response.ok) return
+    if (!response.ok) throw new Error(`Load Report Failed: HTTP ${response.status} ${response.statusText}`)
     const result = await response.json()
-    if (result.status === 200 && result.data) {
-      reportDetail.value = result.data
-    }
+    if (result.status !== 200 || !result.data) throw new Error(`Load Report Failed: ${result.data?.message || `Status ${result.status}`}`)
+    reportDetail.value = result.data
   } catch (error) {
-    console.error('[Report] 获取失败：', error)
+    console.error(`[Report] 加载报告 ${report.id} 详情失败：`, error)
   }
 }
 
 async function deleteSelected() {
   if (selectedIds.value.size === 0) return
+  const ids = Array.from(selectedIds.value)
   try {
-    const response = await fetch('/api/reports/delete', {  method: 'DELETE',  headers: { 'Content-Type': 'application/json' },  body: JSON.stringify({ ids: Array.from(selectedIds.value) })  })
-    if (!response.ok) return
+    const response = await fetch('/api/reports/delete', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    if (!response.ok) throw new Error(`Delete Reports Failed: HTTP ${response.status} ${response.statusText}`)
     const result = await response.json()
-    if (result.status === 200) {
-      selectedIds.value.clear()
-      await loadReports()
-    }
+    if (result.status !== 200) throw new Error(`Delete Reports Failed: ${result.data?.message || `Status ${result.status}`}`)
+    selectedIds.value.clear()
+    await loadReports()
   } catch (error) {
-    console.error('[Report] 删除失败：', error)
+    console.error(`[Report] 删除报告 ${ids.join(',')} 失败：`, error)
   }
 }
 
 async function loadReports() {
+  const page = currentPage.value
   try {
-    const response = await fetch(`/api/reports/list?${new URLSearchParams({ page: String(currentPage.value), pageSize: '100' })}`)
-    if (!response.ok) return
+    const response = await fetch(`/api/reports/list?${new URLSearchParams({ page: String(page), pageSize: '100' })}`)
+    if (!response.ok) throw new Error(`Load Reports Failed: HTTP ${response.status} ${response.statusText}`)
     const result = await response.json()
-    if (result.status === 200 && Array.isArray(result.data)) {
-      reports.value = result.data
-      hasMorePages.value = result.data.length === 100
-      selectedIds.value.clear()
-    }
+    if (result.status !== 200 || !Array.isArray(result.data)) throw new Error(`Load Reports Failed: ${result.data?.message || `Status ${result.status}`}`)
+    reports.value = result.data
+    hasMorePages.value = result.data.length === 100
+    selectedIds.value.clear()
   } catch (error) {
-    console.error('[Report] 加载失败：', error)
+    console.error(`[Report] 加载报告列表第 ${page} 页失败：`, error)
   }
 }
 
@@ -261,9 +256,10 @@ async function startImport() {
   importMessage.value = '正在导入...'
   importStats.value = { total: 0, success: 0, skipped: 0, failed: 0 }
   try {
-    const response = await fetch('/api/reports/add', {  method: 'POST',  headers: { 'Content-Type': 'application/json' },  body: JSON.stringify({ action: 'start' })  })
+    const response = await fetch('/api/reports/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start' }) })
+    if (!response.ok) throw new Error(`Import Failed: HTTP ${response.status} ${response.statusText}`)
     const reader = response.body?.getReader()
-    if (!reader) throw new Error
+    if (!reader) throw new Error('Import Failed: Response body is not readable')
     const decoder = new TextDecoder()
     let buffer = ''
     while (isImporting.value) {
@@ -274,35 +270,34 @@ async function startImport() {
       buffer = lines.pop() || ''
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
+        let event
         try {
-          const json = JSON.parse(line.slice(6))
-          if (json.status === 200 && json.data) {
-            const data = json.data
-            if (data.message) importMessage.value = data.message
-            if (data.total !== undefined) {
-              importStats.value = { total: data.total, success: data.success ?? 0, skipped: data.skipped ?? 0, failed: data.failed ?? 0 }
-            } else if (importStats.value) {
-              if (data.success !== undefined) importStats.value.success = data.success
-              if (data.skipped !== undefined) importStats.value.skipped = data.skipped
-              if (data.failed !== undefined) importStats.value.failed = data.failed
-            }
-            if (data.done) {
-              isImporting.value = false
-              await loadReports()
-            } else if (data.cancelled) {
-              isImporting.value = false
-            }
-          } else if (json.status >= 400) {
-            importMessage.value = `错误: ${json.data?.message}`
-            isImporting.value = false
-          }
-        } catch (parseError) {
-          console.warn('[Report] 解析失败：', parseError)
+          event = JSON.parse(line.slice(6))
+        } catch (error) {
+          console.error(`[Report] 解析导入数据 ${line} 失败：`, error)
+          continue
+        }
+        if (event.status >= 400) throw new Error(`Import Failed: ${event.data?.message || `Status ${event.status}`}`)
+        if (event.status !== 200 || !event.data) continue
+        const importData = event.data
+        if (importData.message) importMessage.value = importData.message
+        if (importData.total !== undefined) {
+          importStats.value = { total: importData.total, success: importData.success ?? 0, skipped: importData.skipped ?? 0, failed: importData.failed ?? 0 }
+        } else {
+          if (importData.success !== undefined) importStats.value.success = importData.success
+          if (importData.skipped !== undefined) importStats.value.skipped = importData.skipped
+          if (importData.failed !== undefined) importStats.value.failed = importData.failed
+        }
+        if (importData.done) {
+          isImporting.value = false
+          await loadReports()
+        } else if (importData.cancelled) {
+          isImporting.value = false
         }
       }
     }
   } catch (error) {
-    console.error('[Report] 导入失败：', error)
+    console.error(`[Report] 导入报告失败：总计 ${importStats.value.total}、成功 ${importStats.value.success}、跳过 ${importStats.value.skipped}、失败 ${importStats.value.failed}`, error)
     importMessage.value = `错误: ${error instanceof Error ? error.message : '导入失败'}`
     isImporting.value = false
   }
@@ -312,9 +307,10 @@ async function cancelImport() {
   if (!isImporting.value) return
   importMessage.value = '正在取消...'
   try {
-    await fetch('/api/reports/add', {  method: 'POST',  headers: { 'Content-Type': 'application/json' },  body: JSON.stringify({ action: 'cancel' })  })
+    const response = await fetch('/api/reports/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel' }) })
+    if (!response.ok) throw new Error(`Cancel Import Failed: HTTP ${response.status} ${response.statusText}`)
   } catch (error) {
-    console.error('[Report] 取消失败：', error)
+    console.error('[Report] 取消导入失败：', error)
     isImporting.value = false
   }
 }
@@ -323,15 +319,14 @@ onMounted(async () => {
   await loadReports()
   try {
     const response = await fetch('/api/reports/add')
-    if (!response.ok) return
+    if (!response.ok) throw new Error(`Check Status Failed: HTTP ${response.status} ${response.statusText}`)
     const result = await response.json()
     if (result.status === 200 && result.data?.importing) {
       showImportModal.value = true
-      isImporting.value = true
-      startImport()
+      await startImport()
     }
   } catch (error) {
-    console.warn('[Report] 检查失败：', error)
+    console.error('[Report] 检查状态失败：', error)
   }
 })
 

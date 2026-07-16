@@ -12,8 +12,8 @@ function formatBytes(bytes: number): string {
 }
 
 function getDiskSize(): number {
+  const path = getConfig('dataDir')
   try {
-    const path = getConfig('dataDir')
     const cmd = os.platform() === 'win32' ? `dir /s "${path}" | findstr "bytes" | findstr /v "free"` : `du -sb "${path}"`
     const output = execSync(cmd).toString()
     if (os.platform() === 'win32') {
@@ -21,7 +21,10 @@ function getDiskSize(): number {
       return matches ? parseInt(matches[1]!.replace(/,/g, '')) : 0
     }
     return parseInt(output.split('\t')[0]!)
-  } catch { return 0 }
+  } catch (error) {
+    console.error(`[Status] 获取磁盘占用失败，目录：${path}`, error)
+    return 0
+  }
 }
 
 export default defineEventHandler(async (event) => {
@@ -29,7 +32,12 @@ export default defineEventHandler(async (event) => {
     if (event.method === 'GET') incrementStat('visits')
     const reports = getReportCounts()
     const files = getFileCounts()
-    const vectorCount = await getCount().catch(() => 0)
+    let vectorCount = 0
+    try {
+      vectorCount = await getCount()
+    } catch (error) {
+      console.error('[Status] 获取向量数量失败', error)
+    }
     const mem = process.memoryUsage()
     return {
       status: 200,
@@ -44,7 +52,7 @@ export default defineEventHandler(async (event) => {
       },
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Get Status Failed'
-    return { status: 500, data: { message } }
+    console.error('[Status] 获取服务状态失败', err)
+    return { status: 500, data: { message: err instanceof Error ? err.message : '获取服务状态失败' } }
   }
 })

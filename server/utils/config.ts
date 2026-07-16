@@ -29,42 +29,26 @@ const defaultConfig: AppConfig = {
   semanticWeight: 0.6,
 }
 
-function getDataDir(): string {
-  const envDir = process.env.DATA_DIR
-  return resolve(envDir || defaultConfig.dataDir)
-}
+function getDataDir(): string { return resolve(process.env.DATA_DIR || defaultConfig.dataDir) }
 
-function getConfigPath(): string {
-  return join(getDataDir(), 'config.json')
-}
+function getConfigPath(): string { return join(getDataDir(), 'config.json') }
 
-function ensureDataDir(): void {
-  const dir = getDataDir()
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-}
+function ensureDataDir(): void { if (!existsSync(getDataDir())) mkdirSync(getDataDir(), { recursive: true }) }
 
 function readConfigFile(): Partial<AppConfig> {
   const path = getConfigPath()
   if (!existsSync(path)) return {}
   try {
-    const content = readFileSync(path, 'utf-8')
-    return JSON.parse(content)
+    return JSON.parse(readFileSync(path, 'utf-8'))
   } catch (err) {
-    console.log('[Config] 读取配置失败：', err)
+    console.error(`[Config] 读取配置 ${path} 失败：`, err)
     return {}
   }
 }
 
 function writeConfigFile(config: Partial<AppConfig>): void {
-  try {
-    ensureDataDir()
-    const path = getConfigPath()
-    const existing = readConfigFile()
-    const merged = { ...existing, ...config }
-    writeFileSync(path, JSON.stringify(merged, null, 2), 'utf-8')
-  } catch (err) {
-    console.log('[Config] 更新配置失败：', err)
-  }
+  ensureDataDir()
+  writeFileSync(getConfigPath(), JSON.stringify({ ...readConfigFile(), ...config }, null, 2), 'utf-8')
 }
 
 export function getConfig(): AppConfig
@@ -91,9 +75,5 @@ export function getConfig<K extends keyof AppConfig>(key?: K): AppConfig | AppCo
 export function setConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]): void
 export function setConfig(config: Partial<AppConfig>): void
 export function setConfig<K extends keyof AppConfig>(keyOrConfig: K | Partial<AppConfig>, value?: AppConfig[K]): void {
-  if (typeof keyOrConfig === 'string') {
-    writeConfigFile({ [keyOrConfig]: value } as Partial<AppConfig>)
-  } else {
-    writeConfigFile(keyOrConfig)
-  }
+  writeConfigFile(typeof keyOrConfig === 'string' ? { [keyOrConfig]: value } as Partial<AppConfig> : keyOrConfig)
 }

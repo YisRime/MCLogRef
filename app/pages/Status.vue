@@ -4,7 +4,7 @@
       <div>
         <h2 class="text-3xl font-bold text-slate-800">状态统计</h2>
       </div>
-      <Button variant="secondary" size="icon" :disabled="loading" @click="refresh">
+      <Button variant="secondary" size="icon" :disabled="loading" @click="loadStatus(true)">
         <svg :class="['w-5 h-5', loading && 'animate-spin']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       </Button>
     </div>
@@ -211,24 +211,20 @@ const data = ref({
 
 const cpuPercent = computed(() => `${Math.min(parseFloat(data.value.cpu) * 100, 100).toFixed(0)}%`)
 
-async function fetch() {
+async function loadStatus(showLoading = false) {
+  if (loading.value) return
+  loading.value = showLoading
   try {
-    const res = await window.fetch('/api/status')
-    if (res.ok) {
-      const result = await res.json()
-      data.value = result.data || result
-    }
-  } catch (err) {
-    console.error('[Status] 获取失败：', err)
+    const response = await fetch('/api/status')
+    if (!response.ok) throw new Error(`Load Status Failed: HTTP ${response.status} ${response.statusText}`)
+    const result = await response.json()
+    data.value = result.data || result
+  } catch (error) {
+    console.error('[Status] 加载状态失败：', error)
+  } finally {
+    if (showLoading) setTimeout(() => { loading.value = false }, 1000)
   }
 }
 
-async function refresh() {
-  if (loading.value) return
-  loading.value = true
-  await fetch()
-  setTimeout(() => loading.value = false, 1000)
-}
-
-onMounted(() => fetch())
+onMounted(loadStatus)
 </script>

@@ -1,4 +1,4 @@
-import { join } from 'path'
+import { basename, join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, renameSync, readFileSync } from 'fs'
 import { getConfig } from '../utils/config'
 import { createReport, createFile, createTag, updateReport, deleteReport, getReportByName, incrementStat } from '../utils/database/sqlite'
@@ -9,11 +9,10 @@ import { deleteByReport } from '../utils/database/lance'
 export default defineEventHandler(async (event) => {
   try {
     const formData = await readMultipartFormData(event)
-    if (!formData?.length) return { status: 400, data: { message: 'No File Uploaded' } }
+    if (!formData?.length) return { status: 400, data: { message: '未上传文件' } }
     const file = formData[0]
-    if (!file?.filename) return { status: 400, data: { message: 'No File Name' } }
-    const filename = file.filename
-    console.log(`[API] 上传文件：${filename}`)
+    if (!file?.filename) return { status: 400, data: { message: '文件名为空' } }
+    const filename = basename(file.filename)
     const existing = getReportByName(filename)
     if (existing) return { status: 200, data: { id: existing.id, name: existing.name, skipped: true } }
     const dataDir = getConfig('dataDir')
@@ -26,7 +25,7 @@ export default defineEventHandler(async (event) => {
     const files: GroupFile[] = filename.toLowerCase().endsWith('.zip')
       ? await readZipFile(readFileSync(tempPath), filename)
       : [{ name: filename, type: detectFileType(filename, filename), content: decodeFile(readFileSync(tempPath)) }]
-    if (files.length === 0) throw new Error('No Valid Files Found')
+    if (files.length === 0) throw new Error('Upload Failed: No valid files found')
     const group: FileGroup = { name: filename, files, filePath: [filename] }
     const rid = createReport(filename)
     try {
@@ -36,19 +35,20 @@ export default defineEventHandler(async (event) => {
       for (const tag of tags.error) createTag(rid, 'error', tag)
       for (const tag of tags.mod) createTag(rid, 'mod', tag)
       for (const reportFile of files) createFile(rid, reportFile.name, reportFile.type, reportFile.content)
-      await vectorizeFiles(rid, files, tags, filename)
+      await vectorizeFiles(rid, files, tags)
       renameSync(tempPath, join(userDir, filename))
       updateReport(rid, { status: 2 })
     } catch (error) {
-      deleteReport(rid)
-      await deleteByReport(rid)
+      const cleanup = await Promise.allSettled([Promise.resolve().then(() => deleteReport(rid)), deleteByReport(rid)])
+      for (const [index, result] of cleanup.entries()) {
+        if (result.status === 'rejected') console.error(`[Report] 上传回滚失败，报告 ID：${rid}，数据源：${index === 0 ? 'SQLite' : 'LanceDB'}`, result.reason)
+      }
       throw error
     }
     incrementStat('user_uploads')
-    console.log(`[API] ${filename} 上传完成，ID 为 ${rid}`)
     return { status: 200, data: { id: rid, name: filename } }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Request Failed'
-    return { status: 500, data: { message } }
+    console.error('[Report] 处理文件上传失败', err)
+    return { status: 500, data: { message: err instanceof Error ? err.message : '文件上传失败' } }
   }
 })

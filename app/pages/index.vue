@@ -88,7 +88,7 @@
                 <Button variant="primary" size="lg" :disabled="status !== 'idle'" @click.stop="start">分析</Button>
               </div>
             </div>
-            <input ref="input" type="file" accept=".txt,.log,.zip" class="hidden" @change="select">
+            <input ref="input" type="file" accept=".txt,.log,.zip" class="hidden" @change="file = ($event.target as HTMLInputElement).files?.[0]">
           </Card>
           <Card class="flex-1 min-h-0">
             <div class="p-6 flex flex-col h-full">
@@ -149,11 +149,6 @@ const badge = computed(() => {
   return null
 })
 
-const select = (e: Event) => {
-  const target = e.target as HTMLInputElement
-  if (target.files?.[0]) file.value = target.files[0]
-}
-
 const reset = () => {
   file.value = undefined
   rid.value = undefined
@@ -170,15 +165,16 @@ const start = async () => {
     const fd = new FormData()
     fd.append('file', file.value)
     const uploadRes = await fetch('/api/report', { method: 'POST', body: fd })
+    if (!uploadRes.ok) throw new Error(`Upload Failed: HTTP ${uploadRes.status} ${uploadRes.statusText}`)
     const uploadData = await uploadRes.json()
-    if (uploadData.status !== 200 || !uploadData.data?.id) throw new Error(uploadData.data?.message)
+    if (uploadData.status !== 200 || !uploadData.data?.id) throw new Error(`Upload Failed: ${uploadData.data?.message || `Status ${uploadData.status}`}`)
     rid.value = uploadData.data.id
     status.value = 'analyzing'
     result.value = ''
     const analyzeRes = await fetch('/api/analyze', { method: 'POST', body: JSON.stringify({ rid: rid.value }), headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(600000) })
-    if (!analyzeRes.ok) throw new Error(`${analyzeRes.status} ${analyzeRes.statusText}`)
+    if (!analyzeRes.ok) throw new Error(`Analysis Failed: HTTP ${analyzeRes.status} ${analyzeRes.statusText}`)
     const reader = analyzeRes.body?.getReader()
-    if (!reader) throw new Error
+    if (!reader) throw new Error('Analysis Failed: Response body is not readable')
     const decoder = new TextDecoder()
     let buffer = ''
     while (true) {
@@ -189,21 +185,26 @@ const start = async () => {
       buffer = chunks.pop() || ''
       for (const chunk of chunks) {
         if (!chunk.trim() || !chunk.startsWith('data: ')) continue
+        let event
         try {
-          const { status: code, data } = JSON.parse(chunk.slice(6))
-          if (code === 200 && data) {
-            if (data.content && typeof data.content === 'string') result.value += data.content
-            if (data.done) { status.value = 'done'; return }
-          } else if (code >= 400) throw new Error(data.message)
-        } catch (e) {
-          console.warn('JSON 解析出错：', e)
+          event = JSON.parse(chunk.slice(6))
+        } catch (error) {
+          console.error(`[Index] 解析 ${rid.value} 分析数据 ${chunk.slice(0, 256)} 失败：`, error)
+          continue
         }
+        const { status: code, data } = event
+        if (code >= 400) throw new Error(`Analysis Failed: ${data?.message || `Status ${code}`}`)
+        if (code !== 200 || !data) continue
+        if (typeof data.content === 'string') result.value += data.content
+        if (data.done) { status.value = 'done'; return }
       }
     }
     status.value = 'done'
   } catch (err: unknown) {
+    const failedStage = status.value
     status.value = 'error'
-    result.value = (err as Error).message
+    result.value = err instanceof Error ? err.message : String(err)
+    console.error(`[Index] ${failedStage === 'uploading' ? '上传报告' : '分析报告'} ${file.value?.name}(${rid.value}) 失败：`, err)
   }
 }
 </script>

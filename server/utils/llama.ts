@@ -12,43 +12,27 @@ if (process.env.PROXY_URL) setGlobalDispatcher(new ProxyAgent(process.env.PROXY_
 
 export async function loadEmbeddingModel(): Promise<FeatureExtractionPipeline> {
   if (embeddingModel) return embeddingModel
-  try {
-    console.log(`[Llama] 加载嵌入模型: ${MODEL_NAME}`)
-    embeddingModel = await pipeline('feature-extraction', MODEL_NAME, { dtype: 'fp32' })
-    return embeddingModel
-  } catch (err) {
-    console.log('[Llama] 模型加载失败：', err)
-    throw err
-  }
+  embeddingModel = await pipeline('feature-extraction', MODEL_NAME, { dtype: 'fp32' })
+  return embeddingModel
 }
 
 export async function embedText(text: string): Promise<number[]> {
-  try {
-    if (!embeddingModel) await loadEmbeddingModel()
-    const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
-    return Array.from(output.data as Float32Array)
-  } catch (err) {
-    console.log('[Llama] 文本嵌入失败：', err)
-    throw err
-  }
+  const model = await loadEmbeddingModel()
+  const output = await model(text, { pooling: 'cls', normalize: true })
+  return Array.from(output.data as Float32Array)
 }
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
-  try {
-    if (!embeddingModel) await loadEmbeddingModel()
-    const vectors: number[][] = []
-    for (const text of texts) {
-      const output = await embeddingModel!(text, { pooling: 'cls', normalize: true })
-      vectors.push(Array.from(output.data as Float32Array))
-    }
-    return vectors
-  } catch (err) {
-    console.log('[Llama] 批量嵌入失败：', err)
-    throw err
+  const model = await loadEmbeddingModel()
+  const vectors: number[][] = []
+  for (const text of texts) {
+    const output = await model(text, { pooling: 'cls', normalize: true })
+    vectors.push(Array.from(output.data as Float32Array))
   }
+  return vectors
 }
 
-export async function vectorizeFiles(rid: number, files: GroupFile[], tags: ExtractedTags, label: string): Promise<number> {
+export async function vectorizeFiles(rid: number, files: GroupFile[], tags: ExtractedTags): Promise<number> {
   const chunks = files.flatMap((file) => {
     const meta: Record<string, string> = { type: file.type }
     if (tags.version[0]) meta.version = tags.version[0]
@@ -56,15 +40,13 @@ export async function vectorizeFiles(rid: number, files: GroupFile[], tags: Extr
     if (tags.error[0]) meta.error = tags.error[0]
     return chunkText(file.content, meta)
   })
-  console.log(`[Llama] 开始向量化 ${label}(${rid})，共 ${files.length} 个文件，包含 ${chunks.length} 个切片`)
   for (let i = 0; i < chunks.length; i += 16) {
     const batch = chunks.slice(i, i + 16)
     const vectors = await embedBatch(batch.map(chunk => chunk.text))
-    if (vectors.length !== batch.length) throw new Error(`[Llama] 向量化失败：预期 ${batch.length} 个向量，实际 ${vectors.length} 个`)
+    if (vectors.length !== batch.length) throw new Error(`Vectorize Failed: Expected ${batch.length} vectors, received ${vectors.length}`)
     const records: VectorRecord[] = batch.map((chunk, idx) => ({ id: Date.now() * 1000 + i + idx, rid, meta: chunk.meta, text: chunk.text, vector: vectors[idx]! }))
     await insertVectors(records)
   }
-  console.log(`[Llama] ${label}(${rid}) 向量化完成，新增 ${chunks.length} 条记录`)
   return chunks.length
 }
 
@@ -90,21 +72,10 @@ function rerank(results: VectorRecord[], queryTags: Record<string, string>): Sea
 }
 
 export async function searchSimilar(query: string, limit?: number, filter?: Record<string, string>): Promise<SearchResult[]> {
-  try {
-    const config = getConfig()
-    const searchLimit = limit ?? config.searchLimit
-    const queryVector = await embedText(query)
-    const candidateLimit = config.searchCandidate
-    let filterStr: string | undefined
-    if (filter && filter.loader) filterStr = `meta.loader = '${filter.loader}'`
-    const candidates = await searchVectors(queryVector, candidateLimit, filterStr)
-    const reranked = rerank(candidates, filter || {})
-    console.log(`[Llama] 发现 ${Math.min(searchLimit, reranked.length)} 条记录`)
-    return reranked.slice(0, searchLimit)
-  } catch (err) {
-    console.log('[Llama] 搜索失败：', err)
-    throw err
-  }
+  const config = getConfig()
+  const searchLimit = limit ?? config.searchLimit
+  const candidates = await searchVectors(await embedText(query), config.searchCandidate, filter?.loader ? `meta.loader = '${filter.loader}'` : undefined)
+  return rerank(candidates, filter || {}).slice(0, searchLimit)
 }
 
 export async function closeEmbeddingModel(): Promise<void> {

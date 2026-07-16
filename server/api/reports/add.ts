@@ -9,7 +9,7 @@ import { vectorizeFiles } from '../../utils/llama'
 let importing = false
 
 export default defineEventHandler(async (event) => {
-  if (event.method === 'GET') return { status: 200, data: { importing: importing } }
+  if (event.method === 'GET') return { status: 200, data: { importing } }
   const body = await readBody<{ action?: 'start' | 'cancel' }>(event).catch(() => ({ action: 'start' as const }))
   if (body.action === 'cancel') {
     importing = false
@@ -39,7 +39,8 @@ export default defineEventHandler(async (event) => {
           try {
             const fileGroup = await readFileGroup(item.filePaths, scanPath)
             validations.push({ name: item.name, valid: !!fileGroup.solution?.has_solution, filePaths: item.filePaths })
-          } catch {
+          } catch (error) {
+            console.error(`[Add] 校验导入项失败，项目：${item.name}`, error)
             validations.push({ name: item.name, valid: false, filePaths: item.filePaths })
           }
           if ((index + 1) % 100 === 0 || index === scannedGroups.length - 1) send(`校验中: ${index + 1}/${scannedGroups.length}`)
@@ -88,7 +89,7 @@ export default defineEventHandler(async (event) => {
               for (const tag of tags.mod) createTag(reportId, 'mod', tag)
               for (const file of fileGroup.files) createFile(reportId, file.name, file.type, file.content)
               if (fileGroup.solution) updateReport(reportId, { solution: fileGroup.solution.solution })
-              await vectorizeFiles(reportId, fileGroup.files, tags, fileGroup.name)
+              await vectorizeFiles(reportId, fileGroup.files, tags)
               for (const filePath of item.filePaths) {
                 const sourcePath = join(scanPath, filePath)
                 const destPath = join(adminDir, filePath)
@@ -97,17 +98,20 @@ export default defineEventHandler(async (event) => {
               updateReport(reportId, { status: 1 })
               return { status: 'success' }
             } catch (error) {
-              deleteReport(reportId)
-              await deleteByReport(reportId)
+              const cleanup = await Promise.allSettled([Promise.resolve().then(() => deleteReport(reportId)), deleteByReport(reportId)])
+              for (const [index, result] of cleanup.entries()) {
+                if (result.status === 'rejected') console.error(`[Add] 导入回滚失败，报告 ID：${reportId}，数据源：${index === 0 ? 'SQLite' : 'LanceDB'}`, result.reason)
+              }
               throw error
             }
           }))
-          for (const result of results) {
+          for (const [index, result] of results.entries()) {
             if (result.status === 'fulfilled') {
               if (result.value.status === 'success') successCount++
               else if (result.value.status === 'skipped') skippedCount++
             } else {
               failedCount++
+              console.error(`[Add] 导入项目失败，项目：${batch[index]?.name ?? '未知'}`, result.reason)
             }
           }
           if ((offset + batch.length) % 10 === 0 || offset + batch.length === validItems.length) send(`处理中: ${offset + batch.length}/${validItems.length}`, false, { current: offset + batch.length, total: validItems.length, success: successCount, skipped: skippedCount, failed: failedCount })
@@ -118,7 +122,8 @@ export default defineEventHandler(async (event) => {
         }
         send(`导入完成，成功 ${successCount} 项（跳过 ${skippedCount} 项，失败 ${failedCount} 项）`, true, { success: successCount, skipped: skippedCount, failed: failedCount })
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Import Failed'
+        console.error(`[Add] 执行批量导入失败，目录：${scanPath}`, error)
+        const message = error instanceof Error ? error.message : '批量导入失败'
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 500, data: { message } })}\n\n`))
       } finally {
         importing = false
@@ -126,5 +131,5 @@ export default defineEventHandler(async (event) => {
       }
     },
   })
-  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'  } })
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' } })
 })

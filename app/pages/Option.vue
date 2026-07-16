@@ -94,13 +94,11 @@ const config = ref<Config>({
 async function loadConfig() {
   try {
     const response = await fetch('/api/config')
-    if (response.ok) {
-      const result = await response.json()
-      const configData = result.data || result
-      config.value = { ...config.value, ...configData }
-    }
+    if (!response.ok) throw new Error(`Load Config Failed: HTTP ${response.status} ${response.statusText}`)
+    const result = await response.json()
+    config.value = { ...config.value, ...(result.data || result) }
   } catch (error) {
-    console.error('[Option] 加载失败：', error)
+    console.error('[Option] 加载配置失败：', error)
   }
 }
 
@@ -108,19 +106,15 @@ async function saveConfig() {
   status.value = 'saving'
   try {
     const response = await fetch('/api/config', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config.value) })
-    if (response.ok) {
-      status.value = 'success'
-    } else {
-      status.value = 'error'
-      console.error('[Option] 保存失败：', response.status, response.statusText)
-    }
+    if (!response.ok) throw new Error(`Save Config Failed: HTTP ${response.status} ${response.statusText}`)
+    status.value = 'success'
   } catch (error) {
     status.value = 'error'
-    console.error('[Option] 保存出错：', error)
+    console.error('[Option] 保存配置失败：', error)
   } finally {
     setTimeout(() => { status.value = 'idle' }, 1000)
   }
 }
 
-onMounted(() => loadConfig())
+onMounted(loadConfig)
 </script>

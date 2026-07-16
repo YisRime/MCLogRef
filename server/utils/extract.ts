@@ -153,7 +153,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
             continue
           }
         } catch (err) {
-          console.log(`[Extract] 解析 ${filePath} 失败：`, err)
+          console.error(`[Extract] 解析文件 ${filePath} 失败：`, err)
         }
       }
       if (ext === '.zip') {
@@ -172,7 +172,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
             contentFiles.push(zf)
           }
         } catch (err) {
-          console.log(`[Extract] 读取 ${filePath} 失败：`, err)
+          console.error(`[Extract] 读取压缩包 ${filePath} 失败：`, err)
         }
         continue
       }
@@ -182,10 +182,10 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
         const fileType = detectFileType(base, groupBaseName)
         contentFiles.push({ name: base, type: fileType, content })
       } catch (err) {
-        console.log(`[Extract] 读取 ${filePath} 失败：`, err)
+        console.error(`[Extract] 读取文件 ${filePath} 失败：`, err)
       }
     } catch (err) {
-      console.log(`[Extract] 处理 ${filePath} 失败：`, err)
+      console.error(`[Extract] 处理文件 ${filePath} 失败：`, err)
     }
   }
   return { name: groupBaseName, files: contentFiles, chat, solution, filePath: filePaths }
@@ -193,7 +193,7 @@ export async function readFileGroup(filePaths: string[], basePath: string): Prom
 
 export async function readZipFile(input: string | Uint8Array, source?: string): Promise<GroupFile[]> {
   const zipSource = typeof input === 'string' ? input : source
-  if (!zipSource) throw new Error('ZIP source name is required for byte input')
+  if (!zipSource) throw new Error('Read ZIP Failed: Source name is required for byte input')
   try {
     const data = typeof input === 'string' ? await readFile(input) : input
     const zip = await JSZip.loadAsync(data)
@@ -207,12 +207,12 @@ export async function readZipFile(input: string | Uint8Array, source?: string): 
         const fileType = detectFileType(base, zipBaseName)
         files.push({ name: base, type: fileType, content })
       } catch (err) {
-        console.log(`[Extract] 读取 Zip 中 ${path} 失败：`, err)
+        console.error(`[Extract] 读取压缩包 ${zipSource} 内容 ${path} 失败：`, err)
       }
     }
     return files
   } catch (err) {
-    console.log(`[Extract] 加载 ${zipSource} 失败：`, err)
+    console.error(`[Extract] 加载压缩包 ${zipSource} 失败：`, err)
     return []
   }
 }
@@ -231,8 +231,7 @@ export async function scanDirectory(directoryPath: string): Promise<Array<{ name
       topFiles.push(entry)
     }
   }
-  const groupedTop = identifyFileGroup(topFiles)
-  for (const group of groupedTop) result.push({ name: extractGroupKey(group[0]!), filePaths: group })
+  for (const group of identifyFileGroup(topFiles)) result.push({ name: extractGroupKey(group[0]!), filePaths: group })
   for (const directory of subDirectories) {
     const subFiles = await readdir(join(directoryPath, directory))
     result.push({ name: directory, filePaths: subFiles.map((file: string) => join(directory, file)) })
@@ -353,8 +352,7 @@ function extractMods(content: string): string[] {
     const pkg = modMatch[1]
     if (pkg && !seen.has(pkg)) {
       seen.add(pkg)
-      const isOfficial = OFFICIAL_PACKAGES.some(op => pkg.startsWith(op))
-      if (!isOfficial) {
+      if (!OFFICIAL_PACKAGES.some(op => pkg.startsWith(op))) {
         const shortPkg = pkg.split('.').slice(0, 3).join('.')
         if (Boolean(shortPkg) && !INVALID_MOD_NAMES.some(invalid => shortPkg === invalid || shortPkg.startsWith(invalid))) modPackages.add(shortPkg)
       }
