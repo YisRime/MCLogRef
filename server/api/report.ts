@@ -9,9 +9,9 @@ import { deleteByReport } from '../utils/database/lance'
 export default defineEventHandler(async (event) => {
   try {
     const formData = await readMultipartFormData(event)
-    if (!formData?.length) return { status: 400, data: { message: '未上传文件' } }
+    if (!formData?.length) return { status: 400, data: { message: 'Missing File Data' } }
     const file = formData[0]
-    if (!file?.filename) return { status: 400, data: { message: '文件名为空' } }
+    if (!file?.filename) return { status: 400, data: { message: 'Missing File Name' } }
     const filename = basename(file.filename)
     const existing = getReportByName(filename)
     if (existing) return { status: 200, data: { id: existing.id, name: existing.name, skipped: true } }
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     const files: GroupFile[] = filename.toLowerCase().endsWith('.zip')
       ? await readZipFile(readFileSync(tempPath), filename)
       : [{ name: filename, type: detectFileType(filename, filename), content: decodeFile(readFileSync(tempPath)) }]
-    if (files.length === 0) throw new Error('Upload Failed: No valid files found')
+    if (files.length === 0) throw new Error('No valid files')
     const group: FileGroup = { name: filename, files, filePath: [filename] }
     const rid = createReport(filename)
     try {
@@ -39,16 +39,12 @@ export default defineEventHandler(async (event) => {
       renameSync(tempPath, join(userDir, filename))
       updateReport(rid, { status: 2 })
     } catch (error) {
-      const cleanup = await Promise.allSettled([Promise.resolve().then(() => deleteReport(rid)), deleteByReport(rid)])
-      for (const [index, result] of cleanup.entries()) {
-        if (result.status === 'rejected') console.error(`[Report] 上传回滚失败，报告 ID：${rid}，数据源：${index === 0 ? 'SQLite' : 'LanceDB'}`, result.reason)
-      }
+      await Promise.allSettled([Promise.resolve().then(() => deleteReport(rid)), deleteByReport(rid)])
       throw error
     }
     incrementStat('user_uploads')
     return { status: 200, data: { id: rid, name: filename } }
-  } catch (err) {
-    console.error('[Report] 处理文件上传失败', err)
-    return { status: 500, data: { message: err instanceof Error ? err.message : '文件上传失败' } }
+  } catch {
+    return { status: 500, data: { message: 'Uploading File Failed' } }
   }
 })

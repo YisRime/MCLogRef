@@ -22,7 +22,7 @@ function getDiskSize(): number {
     }
     return parseInt(output.split('\t')[0]!)
   } catch (error) {
-    console.error(`[Status] 获取磁盘占用失败，目录：${path}`, error)
+    console.error('[Status] Getting Disk Size Failed:', error)
     return 0
   }
 }
@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
     try {
       vectorCount = await getCount()
     } catch (error) {
-      console.error('[Status] 获取向量数量失败', error)
+      console.error('[Status] Getting Vectors Failed:', error)
     }
     const mem = process.memoryUsage()
     return {
@@ -51,8 +51,7 @@ export default defineEventHandler(async (event) => {
         },
       },
     }
-  } catch (err) {
-    console.error('[Status] 获取服务状态失败', err)
-    return { status: 500, data: { message: err instanceof Error ? err.message : '获取服务状态失败' } }
+  } catch {
+    return { status: 500, data: { message: 'Getting Status Failed' } }
   }
 })

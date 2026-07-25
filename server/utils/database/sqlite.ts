@@ -135,10 +135,6 @@ export function getTagsByReport(rid: number): Tag[] {
   return getDatabase().prepare('SELECT * FROM tags WHERE rid = ?').all(rid) as Tag[]
 }
 
-export function getTagsByType(type: Tag['type']): Tag[] {
-  return getDatabase().prepare('SELECT * FROM tags WHERE type = ?').all(type) as Tag[]
-}
-
 export function getStat(key: string): number {
   return (getDatabase().prepare('SELECT value FROM stats WHERE key = ?').get(key) as { value: number } | undefined)?.value || 0
 }

@@ -166,9 +166,3 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
   }
   yield { content: '', done: true }
 }
-
-export async function analyze(rid: number): Promise<string> {
-  let result = ''
-  for await (const chunk of analyzeStream(rid)) result += chunk.content
-  return result
-}

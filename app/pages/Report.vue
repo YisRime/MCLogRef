@@ -107,7 +107,7 @@
           <div v-if="reportDetail.files && reportDetail.files.length > 0" class="flex-1">
             <h4 class="text-xs font-semibold text-slate-600 mb-1.5">文件列表</h4>
             <div class="grid grid-cols-4 gap-2">
-              <div v-for="file in reportDetail.files" :key="file.id" class="flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+              <div v-for="file in reportDetail.files" :key="file.id" class="flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg hover:bg-cyan-50 hover:border-cyan-300 transition-colors cursor-pointer" @click="viewFileContent(file)">
                 <div :class="['w-6 h-6 rounded flex items-center justify-center shrink-0', { crash: 'bg-rose-100 text-rose-600', other: 'bg-slate-100 text-slate-600', log: 'bg-yellow-100 text-yellow-600', gamelog: 'bg-orange-100 text-orange-600', discuss: 'bg-green-100 text-green-600' }[file.type]]">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" /></svg>
                 </div>
@@ -121,6 +121,9 @@
           <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{{ reportDetail.solution }}</div>
         </div>
       </div>
+    </Modal>
+    <Modal v-model="showFileModal" :title="selectedFile ? `${selectedFile.file} - ${({ crash: '崩溃报告', gamelog: '游戏日志', log: '日志', discuss: '讨论', other: '其他' }[selectedFile.type])}` : ''" size="xl">
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-xs text-slate-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{{ selectedFile?.content }}</div>
     </Modal>
     <Modal v-model="showImportModal" title="导入" size="md">
       <div class="flex flex-col gap-4">
@@ -169,7 +172,7 @@ interface FileInfo {
   rid: number
   file: string
   type: 'crash' | 'gamelog' | 'log' | 'discuss' | 'other'
-  content: string
+  content?: string
 }
 
 interface TagInfo {
@@ -196,6 +199,8 @@ const reports = ref<Report[]>([])
 const selectedReport = ref<Report | null>(null)
 const reportDetail = ref<ReportDetail | null>(null)
 const showDetailModal = ref(false)
+const showFileModal = ref(false)
+const selectedFile = ref<FileInfo | null>(null)
 const showImportModal = ref(false)
 const isImporting = ref(false)
 const importMessage = ref('')
@@ -217,6 +222,22 @@ async function viewReport(report: Report) {
     reportDetail.value = result.data
   } catch (error) {
     console.error(`[Report] 加载报告 ${report.id} 详情失败：`, error)
+  }
+}
+
+async function viewFileContent(file: FileInfo) {
+  selectedFile.value = file
+  showFileModal.value = true
+  if (file.content) return
+  try {
+    const response = await fetch(`/api/reports/info?id=${file.rid}&content=true&fileId=${file.id}`)
+    if (!response.ok) throw new Error(`Load File Failed: HTTP ${response.status} ${response.statusText}`)
+    const result = await response.json()
+    if (result.status !== 200 || !result.data) throw new Error(`Load File Failed: ${result.data?.message || `Status ${result.status}`}`)
+    file.content = result.data.content
+    selectedFile.value = result.data
+  } catch (error) {
+    console.error(`[Report] 加载文件 ${file.id} 内容失败：`, error)
   }
 }
 

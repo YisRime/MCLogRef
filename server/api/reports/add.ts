@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<{ action?: 'start' | 'cancel' }>(event).catch(() => ({ action: 'start' as const }))
   if (body.action === 'cancel') {
     importing = false
-    return { status: 200, data: { message: '正在取消...' } }
+    return { status: 200, data: { message: 'Cancelling Import Process' } }
   }
   importing = true
   const dataDir = getConfig('dataDir')
@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
         const adminDir = join(dataDir, 'files', 'admin')
         if (!existsSync(adminDir)) mkdirSync(adminDir, { recursive: true })
         const scannedGroups = await scanDirectory(scanPath)
-        send(`扫描完成，共 ${scannedGroups.length} 项`, false, { total: scannedGroups.length })
+        send(`扫描完成，共 ${scannedGroups.length} 个项目`, false, { total: scannedGroups.length })
         const validations: Array<{ name: string; valid: boolean; filePaths: string[] }> = []
         for (let index = 0; index < scannedGroups.length; index++) {
           const item = scannedGroups[index]!
@@ -40,15 +40,15 @@ export default defineEventHandler(async (event) => {
             const fileGroup = await readFileGroup(item.filePaths, scanPath)
             validations.push({ name: item.name, valid: !!fileGroup.solution?.has_solution, filePaths: item.filePaths })
           } catch (error) {
-            console.error(`[Add] 校验导入项失败，项目：${item.name}`, error)
+            console.error('[Add] Validating Project Failed:', error)
             validations.push({ name: item.name, valid: false, filePaths: item.filePaths })
           }
-          if ((index + 1) % 100 === 0 || index === scannedGroups.length - 1) send(`校验中: ${index + 1}/${scannedGroups.length}`)
+          if ((index + 1) % 100 === 0 || index === scannedGroups.length - 1) send(`正在验证：${index + 1}/${scannedGroups.length}`)
         }
         const validItems = validations.filter(validation => validation.valid)
         const invalidItems = validations.filter(validation => !validation.valid)
         const invalidCount = invalidItems.length
-        send(`校验完成，有效 ${validItems.length} 项`, false, { valid: validItems.length, invalid: invalidCount })
+        send(`验证完成，剩 ${validItems.length} 个项目`, false, { valid: validItems.length, invalid: invalidCount })
         const otherDir = join(dataDir, 'files', 'other')
         if (!existsSync(otherDir)) mkdirSync(otherDir, { recursive: true })
         for (const invalid of invalidItems) {
@@ -98,32 +98,30 @@ export default defineEventHandler(async (event) => {
               updateReport(reportId, { status: 1 })
               return { status: 'success' }
             } catch (error) {
-              const cleanup = await Promise.allSettled([Promise.resolve().then(() => deleteReport(reportId)), deleteByReport(reportId)])
-              for (const [index, result] of cleanup.entries()) {
-                if (result.status === 'rejected') console.error(`[Add] 导入回滚失败，报告 ID：${reportId}，数据源：${index === 0 ? 'SQLite' : 'LanceDB'}`, result.reason)
-              }
+              await Promise.allSettled([Promise.resolve().then(() => deleteReport(reportId)), deleteByReport(reportId)])
               throw error
             }
           }))
-          for (const [index, result] of results.entries()) {
-            if (result.status === 'fulfilled') {
-              if (result.value.status === 'success') successCount++
-              else if (result.value.status === 'skipped') skippedCount++
-            } else {
+          for (const result of results) {
+            if (result.status === 'rejected') {
               failedCount++
-              console.error(`[Add] 导入项目失败，项目：${batch[index]?.name ?? '未知'}`, result.reason)
+              console.error('[Add] Importing Project Failed:', result.reason)
+            } else if (result.value.status === 'success') {
+              successCount++
+            } else if (result.value.status === 'skipped') {
+              skippedCount++
             }
           }
-          if ((offset + batch.length) % 10 === 0 || offset + batch.length === validItems.length) send(`处理中: ${offset + batch.length}/${validItems.length}`, false, { current: offset + batch.length, total: validItems.length, success: successCount, skipped: skippedCount, failed: failedCount })
+          if ((offset + batch.length) % 10 === 0 || offset + batch.length === validItems.length) send(`正在处理：${offset + batch.length}/${validItems.length}`, false, { current: offset + batch.length, total: validItems.length, success: successCount, skipped: skippedCount, failed: failedCount })
           if (!importing) {
-            send(`导入取消，成功 ${successCount} 项（跳过 ${skippedCount} 项，失败 ${failedCount} 项）`, true, { cancelled: true, success: successCount, skipped: skippedCount, failed: failedCount })
+            send(`导入终止，成功 ${successCount} 个（跳过 ${skippedCount} 个，失败 ${failedCount} 个）`, true, { cancelled: true, success: successCount, skipped: skippedCount, failed: failedCount })
             return
           }
         }
-        send(`导入完成，成功 ${successCount} 项（跳过 ${skippedCount} 项，失败 ${failedCount} 项）`, true, { success: successCount, skipped: skippedCount, failed: failedCount })
+        send(`导入完成，成功 ${successCount} 个（跳过 ${skippedCount} 个，失败 ${failedCount} 个）`, true, { success: successCount, skipped: skippedCount, failed: failedCount })
       } catch (error) {
-        console.error(`[Add] 执行批量导入失败，目录：${scanPath}`, error)
-        const message = error instanceof Error ? error.message : '批量导入失败'
+        console.error('[Add] Importing Batch Failed:', error)
+        const message = error instanceof Error ? error.message : 'Importing Batch Failed'
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 500, data: { message } })}\n\n`))
       } finally {
         importing = false

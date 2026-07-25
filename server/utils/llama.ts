@@ -74,7 +74,7 @@ function rerank(results: VectorRecord[], queryTags: Record<string, string>): Sea
 export async function searchSimilar(query: string, limit?: number, filter?: Record<string, string>): Promise<SearchResult[]> {
   const config = getConfig()
   const searchLimit = limit ?? config.searchLimit
-  const candidates = await searchVectors(await embedText(query), config.searchCandidate, filter?.loader ? `meta.loader = '${filter.loader}'` : undefined)
+  const candidates = await searchVectors(await embedText(query),  config.searchCandidate,  filter && Object.keys(filter).length > 0 ? filter : undefined)
   return rerank(candidates, filter || {}).slice(0, searchLimit)
 }
 

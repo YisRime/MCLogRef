@@ -38,14 +38,20 @@ export async function insertVectors(records: VectorRecord[]): Promise<void> {
   await (await getTable()).add(records as unknown as Record<string, unknown>[])
 }
 
-export async function searchVectors(vector: number[], limit: number = 5, filter?: string): Promise<VectorRecord[]> {
+export async function searchVectors(vector: number[], limit: number = 5, filter?: Record<string, string>): Promise<VectorRecord[]> {
   let query = (await getTable()).query().nearestTo(vector).limit(limit)
-  if (filter) query = query.where(filter)
+  if (filter) {
+    const filterString = Object.entries(filter).filter(([_, value]) => value).map(([key, value]) => `meta.${key} = '${value.replace(/'/g, '\'\'')}'`).join(' AND ')
+    if (filterString) query = query.where(filterString)
+  }
   return await query.toArray() as unknown as VectorRecord[]
 }
 
-export async function searchByMetadata(filter: string, limit: number = 100): Promise<VectorRecord[]> {
-  return await (await getTable()).query().where(filter).limit(limit).toArray() as unknown as VectorRecord[]
+export async function searchByMetadata(filter: Record<string, string>, limit: number = 100): Promise<VectorRecord[]> {
+  const filterString = Object.entries(filter).filter(([_, value]) => value).map(([key, value]) => `meta.${key} = '${value.replace(/'/g, '\'\'')}'`).join(' AND ')
+  if (!filterString) return []
+  const results = await (await getTable()).query().where(filterString).limit(limit).toArray() as unknown as VectorRecord[]
+  return results.sort((a, b) => b.rid - a.rid)
 }
 
 export async function deleteByReport(rid: number): Promise<void> {
