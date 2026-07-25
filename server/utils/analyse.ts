@@ -104,11 +104,14 @@ export interface AnalysisResult {
   done: boolean
 }
 
-export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult> {
+export async function* analyzeStream(rid: number, options?: { apiUrl?: string; apiKey?: string; apiModel?: string }): AsyncGenerator<AnalysisResult> {
   try {
     const context = await buildContext(rid)
     const prompt = buildPrompt(context)
-    const { apiUrl, apiKey, apiModel, temperature } = getConfig()
+    const config = getConfig()
+    const apiUrl = options?.apiUrl || config.apiUrl
+    const apiKey = options?.apiKey || config.apiKey
+    const apiModel = options?.apiModel || config.apiModel
     if (!apiUrl || !apiKey || !apiModel) {
       yield { content: '错误：未配置 LLM API', done: true }
       return
@@ -119,7 +122,7 @@ export async function* analyzeStream(rid: number): AsyncGenerator<AnalysisResult
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
-          model: apiModel, stream: true, temperature: temperature,
+          model: apiModel, stream: true, temperature: config.temperature,
           messages: [ { role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: prompt }],
         }),
       })
