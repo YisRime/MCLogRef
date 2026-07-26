@@ -10,6 +10,7 @@ let importing = false
 
 export default defineEventHandler(async (event) => {
   if (event.method === 'GET') return { status: 200, data: { importing } }
+  if (getCookie(event, 'auth_token') !== 'verified') return { status: 401, data: { message: 'Unauthorized' } }
   const body = await readBody<{ action?: 'start' | 'cancel' }>(event).catch(() => ({ action: 'start' as const }))
   if (body.action === 'cancel') {
     importing = false
