@@ -21,7 +21,7 @@
     "eslint": "^10.5.0",
     "jszip": "^3.10.1",
     "llamaindex": "^0.12.1",
-    "nuxt": "^4.4.8",
+    "nuxt": "^4.5.1",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "undici": "^8.9.0",
